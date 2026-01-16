@@ -19,7 +19,7 @@ uv run python -m scripts.tui.app dataset/conversations.jsonl
 | Key | Action |
 |-----|--------|
 | `Enter` | View full record details (Messages, Tools, Metadata tabs) |
-| `f` | Show field detail modal for current cell |
+| `m` | Show field detail modal for current cell |
 | `q` | Quit application |
 | `ESC` | Close modal / Go back to list |
 | `Tab` | Switch tabs in detail view |
@@ -46,7 +46,7 @@ The main screen displays all records in a table format:
 
 - Use arrow keys to move between cells
 - Press `Enter` to view full record details
-- Press `f` to see detailed information for the current cell
+- Press `m` to see detailed information for the current cell
 
 ### Comparison Screen
 
@@ -63,7 +63,7 @@ Features:
 
 ### Field Detail Modal
 
-Press `f` on any cell to see detailed information:
+Press `m` on any cell to see detailed information:
 
 | Field | Detail View Shows |
 |-------|-------------------|
@@ -95,7 +95,7 @@ Press `f` on any cell to see detailed information:
 ### Inspecting Tools
 
 1. Navigate to a record with tools (TOOLS column > 0)
-2. Press `f` on the TOOLS cell
+2. Press `m` on the TOOLS cell
 3. Scroll through the tool names and descriptions
 4. Press `ESC` to close the modal
 
