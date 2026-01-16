@@ -80,6 +80,34 @@ class JsonTreePanel(Tree[str]):
             self.panel_id = panel_id
             super().__init__()
 
+    class NodeSelected(Message):
+        """Posted when Enter is pressed on a node.
+
+        This message is emitted when the user selects a node by pressing Enter,
+        providing access to the full original data for that node.
+
+        Attributes:
+            node_path: The path to the node (e.g., "root/messages/[0]").
+            node_key: The key name (e.g., "content", "role").
+            node_value: The FULL original value (untruncated).
+            panel_id: The ID of the panel that emitted this message.
+        """
+
+        def __init__(self, node_path: str, node_key: str, node_value: Any, panel_id: str) -> None:
+            """Initialize the NodeSelected message.
+
+            Args:
+                node_path: The path to the node.
+                node_key: The key name for this node.
+                node_value: The full original value (untruncated).
+                panel_id: The ID of the panel that emitted this message.
+            """
+            self.node_path = node_path
+            self.node_key = node_key
+            self.node_value = node_value
+            self.panel_id = panel_id
+            super().__init__()
+
     def __init__(
         self,
         label: str = "root",
@@ -100,6 +128,7 @@ class JsonTreePanel(Tree[str]):
         self.diff_mode: bool = False
         self._diff_map: dict[str, str] = {}
         self._node_paths: dict[TreeNode[str], str] = {}
+        self._node_data: dict[TreeNode[str], Any] = {}
 
     def set_diff_map(self, diff_map: dict[str, str]) -> None:
         """Set the diff map and apply highlighting to nodes.
@@ -165,6 +194,7 @@ class JsonTreePanel(Tree[str]):
         """
         self.clear()
         self._node_paths.clear()
+        self._node_data.clear()
         self.root.set_label(label)
         self._add_json_recursive(self.root, data, json_path="")
         self.root.expand()
@@ -309,8 +339,9 @@ class JsonTreePanel(Tree[str]):
         else:
             child = node.add(label, allow_expand=True)
 
-        # Store the JSON path for this node
+        # Store the JSON path and original data for this node
         self._node_paths[child] = json_path
+        self._node_data[child] = data
 
         for obj_key, obj_value in data.items():
             child_path = f"{json_path}.{obj_key}" if json_path else obj_key
@@ -344,8 +375,9 @@ class JsonTreePanel(Tree[str]):
 
         child = node.add(label, allow_expand=True)
 
-        # Store the JSON path for this node
+        # Store the JSON path and original data for this node
         self._node_paths[child] = json_path
+        self._node_data[child] = data
 
         for idx, item in enumerate(data):
             child_path = f"{json_path}[{idx}]"
@@ -374,13 +406,11 @@ class JsonTreePanel(Tree[str]):
         elif isinstance(data, bool):
             value_str = "true" if data else "false"
         elif isinstance(data, str):
+            # Escape special characters for display (before truncation for accurate length)
+            display_str = data.replace('\\', '\\\\').replace('\n', '\\n').replace('\r', '\\r').replace('\t', '\\t').replace('"', '\\"')
             # Truncate long strings for display
-            if len(data) > 50:
-                display_str = data[:47] + "..."
-            else:
-                display_str = data
-            # Escape quotes in the string
-            display_str = display_str.replace('"', '\\"')
+            if len(display_str) > 50:
+                display_str = display_str[:47] + "..."
             value_str = f'"{display_str}"'
         elif isinstance(data, (int, float)):
             value_str = str(data)
@@ -395,5 +425,64 @@ class JsonTreePanel(Tree[str]):
 
         leaf = node.add_leaf(label)
 
-        # Store the JSON path for this node
+        # Store the JSON path and original data for this node
         self._node_paths[leaf] = json_path
+        self._node_data[leaf] = data
+
+    def get_node_data(self, node: TreeNode[str]) -> tuple[str, Any]:
+        """Get the key and original value for a node.
+
+        Args:
+            node: The tree node to get data for.
+
+        Returns:
+            A tuple of (key, value) where key is extracted from the node's
+            path and value is the original untruncated data.
+        """
+        # Get the original data value
+        value = self._node_data.get(node)
+
+        # Extract the key from the JSON path
+        json_path = self._node_paths.get(node, "")
+        if json_path:
+            # The key is the last segment of the path
+            # Handle array indices like "messages[0]" -> "[0]"
+            # Handle object keys like "messages.content" -> "content"
+            if "[" in json_path and json_path.endswith("]"):
+                # Array index - find the last bracket pair
+                last_bracket = json_path.rfind("[")
+                key = json_path[last_bracket:]
+            elif "." in json_path:
+                # Object key - get the part after the last dot
+                key = json_path.rsplit(".", 1)[-1]
+            else:
+                # Top-level key
+                key = json_path
+        else:
+            # Root node or no path
+            key = str(node.label)
+
+        return (key, value)
+
+    def emit_node_selected(self) -> None:
+        """Emit a NodeSelected message for the current cursor node.
+
+        This should be called when the user requests to view the full
+        content of a node (e.g., by pressing Space).
+        """
+        if not self.cursor_node:
+            return
+
+        node = self.cursor_node
+        node_path = self._node_paths.get(node, "")
+        key, value = self.get_node_data(node)
+
+        if self.id:
+            self.post_message(
+                self.NodeSelected(
+                    node_path=node_path,
+                    node_key=key,
+                    node_value=value,
+                    panel_id=self.id,
+                )
+            )

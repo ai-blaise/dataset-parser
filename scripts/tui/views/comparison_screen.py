@@ -16,6 +16,7 @@ from textual.screen import Screen
 from textual.widgets import Footer, Header, Static
 
 from scripts.tui.data_loader import load_record_pair
+from scripts.tui.widgets import FieldDetailModal
 from scripts.tui.widgets.diff_indicator import calculate_diff
 from scripts.tui.widgets.json_tree_panel import JsonTreePanel
 
@@ -92,7 +93,7 @@ class ComparisonScreen(Screen):
         Binding("tab", "switch_panel", "Switch Panel"),
         Binding("s", "toggle_sync", "Sync Scroll"),
         Binding("d", "toggle_diff", "Show Diff"),
-        Binding("space", "toggle_node", "Expand/Collapse", show=False),
+        Binding("m", "show_field_detail", "View Field", show=True),
         Binding("e", "expand_all", "Expand All"),
         Binding("c", "collapse_all", "Collapse All"),
     ]
@@ -231,17 +232,16 @@ class ComparisonScreen(Screen):
         status = "enabled" if self._diff_enabled else "disabled"
         self.notify(f"Diff highlighting {status}")
 
-    def action_toggle_node(self) -> None:
-        """Toggle expand/collapse on the current node."""
+    def action_show_field_detail(self) -> None:
+        """Show the field detail modal for the current node."""
         # Get the currently focused tree
         if self._active_panel == "left":
             tree = self.query_one("#left-tree", JsonTreePanel)
         else:
             tree = self.query_one("#right-tree", JsonTreePanel)
 
-        # Toggle the current node
-        if tree.cursor_node:
-            tree.cursor_node.toggle()
+        # Emit the node selected message which will trigger the modal
+        tree.emit_node_selected()
 
     def action_expand_all(self) -> None:
         """Expand all nodes in both trees."""
@@ -321,6 +321,32 @@ class ComparisonScreen(Screen):
             right_tree.sync_node_toggle(message.node_path, message.expanded)
         elif message.panel_id == "right-tree":
             left_tree.sync_node_toggle(message.node_path, message.expanded)
+
+    def on_json_tree_panel_node_selected(
+        self, message: JsonTreePanel.NodeSelected
+    ) -> None:
+        """Handle node selection to show field detail modal.
+
+        When a node is selected (Enter pressed), display the full content
+        in a modal dialog.
+
+        Args:
+            message: The NodeSelected message from a JsonTreePanel.
+        """
+        # Determine which panel the message came from
+        if message.panel_id == "left-tree":
+            panel_label = "ORIGINAL JSONL"
+        else:
+            panel_label = "PARSER_FINALE OUTPUT"
+
+        # Push the field detail modal with the node information
+        self.app.push_screen(
+            FieldDetailModal(
+                field_key=message.node_key,
+                field_value=message.node_value,
+                panel_label=panel_label,
+            )
+        )
 
     @property
     def original_record(self) -> dict[str, Any]:
