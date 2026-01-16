@@ -1,0 +1,1 @@
+{"uuid": "no-role-001", "messages": [{"content": "Message without role"}, {"role": "user", "content": "Normal message"}, {"content": "Another without role"}], "tools": [], "license": "cc-by-4.0", "used_in": ["test"]}

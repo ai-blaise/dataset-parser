@@ -1,0 +1,3 @@
+{"uuid": "empty-content-001", "messages": [{"role": "system", "content": ""}, {"role": "user", "content": ""}, {"role": "assistant", "content": ""}], "tools": [], "license": "cc-by-4.0", "used_in": []}
+{"uuid": "empty-content-002", "messages": [{"role": "assistant", "content": null}], "tools": [], "license": "cc-by-4.0", "used_in": []}
+{"uuid": "empty-content-003", "messages": [{"role": "assistant"}], "tools": [], "license": "cc-by-4.0", "used_in": []}

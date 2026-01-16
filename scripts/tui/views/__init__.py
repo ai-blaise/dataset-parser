@@ -1,5 +1,6 @@
-"""TUI views for the JSONL Dataset Explorer."""
+"""TUI views for the JSON Comparison Viewer."""
 
-from scripts.tui.views.record_detail import RecordDetailScreen
+from scripts.tui.views.record_list import RecordListScreen
+from scripts.tui.views.comparison_screen import ComparisonScreen
 
-__all__ = ["RecordDetailScreen"]
+__all__ = ["RecordListScreen", "ComparisonScreen"]

@@ -1,0 +1,1 @@
+{"uuid": "dict-content-001", "messages": [{"role": "system", "content": "Helper"}, {"role": "user", "content": {"type": "complex", "data": {"nested": true}}}, {"role": "assistant", "content": {"response": "structured"}}], "tools": [], "license": "cc-by-4.0", "used_in": ["test"]}

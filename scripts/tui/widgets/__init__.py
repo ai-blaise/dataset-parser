@@ -1,18 +1,17 @@
-"""TUI widgets package."""
+"""TUI widgets for the JSON Comparison Viewer."""
 
-from .message_viewer import MessageViewer, MessageDisplay, Message, ToolCall, ROLE_COLORS
-from .tool_viewer import ToolCollapsible, ToolDetails, ToolParameter, ToolViewer
+from scripts.tui.widgets.json_tree_panel import JsonTreePanel
+from scripts.tui.widgets.diff_indicator import (
+    calculate_diff,
+    get_node_diff_class,
+    get_diff_summary,
+)
 
 __all__ = [
-    # Message viewer
-    "MessageViewer",
-    "MessageDisplay",
-    "Message",
-    "ToolCall",
-    "ROLE_COLORS",
-    # Tool viewer
-    "ToolViewer",
-    "ToolCollapsible",
-    "ToolDetails",
-    "ToolParameter",
+    # JSON tree panel
+    "JsonTreePanel",
+    # Diff indicator functions
+    "calculate_diff",
+    "get_node_diff_class",
+    "get_diff_summary",
 ]

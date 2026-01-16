@@ -1,0 +1,2 @@
+{"uuid": "reasoning-001", "messages": [{"role": "user", "content": "Think"}, {"role": "assistant", "content": "I thought", "reasoning_content": "This is my reasoning process"}], "tools": [], "license": "cc-by-4.0", "used_in": ["test"], "reasoning": "on"}
+{"uuid": "reasoning-002", "messages": [{"role": "user", "content": "No reasoning"}, {"role": "assistant", "content": "Simple response"}], "tools": [], "license": "cc-by-4.0", "used_in": ["test"]}

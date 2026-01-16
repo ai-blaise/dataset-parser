@@ -1,0 +1,3 @@
+{"uuid": "multi-001", "messages": [{"role": "system", "content": "Assistant 1"}, {"role": "user", "content": "Hello"}, {"role": "assistant", "content": "Hi!"}], "tools": [], "license": "cc-by-4.0", "used_in": ["test"]}
+{"uuid": "multi-002", "messages": [{"role": "system", "content": "Assistant 2"}, {"role": "user", "content": "Goodbye"}, {"role": "assistant", "content": "Bye!"}], "tools": [], "license": "cc-by-4.0", "used_in": ["test"]}
+{"uuid": "multi-003", "messages": [{"role": "system", "content": "Assistant 3"}, {"role": "user", "content": "Thanks"}, {"role": "assistant", "content": "Welcome!"}], "tools": [], "license": "cc-by-4.0", "used_in": ["demo"]}

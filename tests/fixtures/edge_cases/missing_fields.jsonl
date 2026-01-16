@@ -1,0 +1,3 @@
+{"messages": [{"role": "user", "content": "Hi"}, {"role": "assistant", "content": "Hello"}]}
+{"uuid": "partial-002", "messages": [{"role": "assistant", "content": "Test"}]}
+{"uuid": "partial-003", "license": "cc-by-4.0"}

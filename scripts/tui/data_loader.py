@@ -18,6 +18,8 @@ from __future__ import annotations
 import json
 from typing import Any, Iterator
 
+from scripts.parser_finale import process_record
+
 
 def truncate(text: str, max_len: int) -> str:
     """
@@ -148,3 +150,63 @@ def get_record_summary(record: dict[str, Any], idx: int) -> dict[str, Any]:
         "reasoning": record.get("reasoning"),
         "preview": preview,
     }
+
+
+def load_record_pair(filename: str, index: int) -> tuple[dict[str, Any], dict[str, Any]]:
+    """
+    Load a single record and return both original and processed versions.
+
+    This function loads the original record from the JSONL file and processes
+    it through parser_finale to create the comparison pair.
+
+    Args:
+        filename: Path to the JSONL file.
+        index: The index of the record to load.
+
+    Returns:
+        A tuple of (original_record, processed_record) where:
+            - original_record: The raw record from the JSONL file
+            - processed_record: The record after parser_finale processing
+              (assistant content emptied, reasoning_content removed)
+
+    Raises:
+        FileNotFoundError: If the file does not exist.
+        IndexError: If the index is out of range.
+
+    Examples:
+        >>> original, processed = load_record_pair("data.jsonl", 0)
+        >>> print(original["messages"][0]["content"])  # Full content
+        >>> print(processed["messages"][0]["content"])  # Empty if assistant
+    """
+    records = load_all_records(filename)
+    if index < 0 or index >= len(records):
+        raise IndexError(f"Record index {index} out of range (0-{len(records) - 1})")
+    original = records[index]
+    processed = process_record(original)
+    return (original, processed)
+
+
+def get_record_diff(original: dict[str, Any], processed: dict[str, Any]) -> dict[str, str]:
+    """
+    Calculate differences between original and processed records.
+
+    Compares the two JSON structures and returns a mapping of JSON paths
+    to their diff status.
+
+    Args:
+        original: The original record dictionary.
+        processed: The processed record dictionary.
+
+    Returns:
+        A dictionary mapping JSON paths to diff types:
+            - "unchanged": Values match exactly
+            - "changed": Value differs between original and processed
+            - "removed": Key exists in original but not in processed
+            - "added": Key exists in processed but not in original
+
+    Examples:
+        >>> diff = get_record_diff(original, processed)
+        >>> print(diff.get("messages[1].content"))  # "changed" for assistant
+    """
+    # Stub implementation - will be fully implemented in diff_indicator.py
+    return {}

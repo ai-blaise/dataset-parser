@@ -1,7 +1,8 @@
 """
-Main Textual application for the JSONL Dataset Explorer.
+Main Textual application for the JSON Comparison Viewer.
 
-This is the entry point for the TUI dataset explorer.
+This is the entry point for the TUI that compares original JSONL records
+with parser_finale processed output side-by-side.
 """
 
 import argparse
@@ -11,14 +12,14 @@ from textual.app import App
 from textual.binding import Binding
 
 from scripts.tui.views.record_list import RecordListScreen
-from scripts.tui.views.record_detail import RecordDetailScreen
+from scripts.tui.views.comparison_screen import ComparisonScreen
 from scripts.tui.data_loader import load_all_records
 
 
-class DatasetExplorerApp(App):
-    """A Textual app to explore JSONL datasets."""
+class JsonComparisonApp(App):
+    """A Textual app for comparing original and processed JSONL records."""
 
-    TITLE = "JSONL Dataset Explorer"
+    TITLE = "JSON Comparison Viewer"
 
     CSS = """
     Screen {
@@ -38,6 +39,7 @@ class DatasetExplorerApp(App):
         background: $primary-darken-2;
     }
 
+    /* DataTable styling for record list */
     DataTable {
         height: 100%;
         background: $surface;
@@ -58,91 +60,68 @@ class DatasetExplorerApp(App):
         background: $primary-lighten-1;
     }
 
-    .record-detail {
-        padding: 1 2;
+    /* Comparison screen layout */
+    #comparison-container {
+        height: 1fr;
     }
 
-    TabbedContent {
-        height: 100%;
-    }
-
-    TabPane {
-        padding: 1;
-    }
-
-    .metadata-container {
-        padding: 1 2;
-        background: $surface-darken-1;
+    #left-panel, #right-panel {
+        width: 50%;
         border: solid $primary;
+        padding: 0 1;
     }
 
-    .metadata-label {
-        color: $text-muted;
+    #left-panel {
+        border-right: none;
+    }
+
+    .panel-header {
+        dock: top;
+        height: 3;
+        background: $surface;
+        border-bottom: solid $primary;
+        text-align: center;
         text-style: bold;
-    }
-
-    .metadata-value {
-        color: $text;
-    }
-
-    .message-container {
-        margin-bottom: 1;
         padding: 1;
-        border: solid $primary-darken-2;
     }
 
-    .role-system {
-        background: $warning-darken-3;
-        color: $text;
+    #left-tree, #right-tree {
+        height: 1fr;
     }
 
-    .role-user {
-        background: $success-darken-3;
-        color: $text;
+    /* Diff highlighting */
+    .diff-added {
+        background: $success 20%;
     }
 
-    .role-assistant {
-        background: $primary-darken-2;
-        color: $text;
+    .diff-removed {
+        background: $error 20%;
     }
 
-    .role-tool {
-        background: $secondary-darken-2;
-        color: $text;
+    .diff-changed {
+        background: $warning 20%;
     }
 
-    .tool-call {
-        background: $accent-darken-2;
+    .diff-unchanged {
+        /* Default styling, no change */
+    }
+
+    /* Tree styling */
+    Tree {
+        background: $surface;
         padding: 1;
-        margin: 1 0;
-        border: dashed $accent;
     }
 
-    .reasoning-content {
-        background: $warning-darken-2;
-        padding: 1;
-        margin: 1 0;
-        border: solid $warning;
-        color: $text;
+    Tree > .tree--cursor {
+        background: $secondary;
     }
 
-    .tool-schema {
-        background: $surface-darken-1;
-        padding: 1;
-        margin: 1 0;
-        border: solid $secondary;
+    Tree > .tree--guides {
+        color: $text-muted;
     }
 
     Static {
         width: 100%;
-    }
-
-    #record-header {
-        dock: top;
-        height: 3;
-        padding: 1;
-        background: $primary-darken-1;
-        text-style: bold;
     }
     """
 
@@ -161,7 +140,7 @@ class DatasetExplorerApp(App):
         self.records: list[dict] = []
 
     def on_mount(self) -> None:
-        """Load data and push the initial screen."""
+        """Load data and push the record list screen."""
         self.records = load_all_records(self.filename)
         self.push_screen(RecordListScreen())
 
@@ -169,22 +148,21 @@ class DatasetExplorerApp(App):
         self, message: RecordListScreen.RecordSelected
     ) -> None:
         """Handle record selection from the list screen."""
-        self.show_record_detail(message.record, message.index)
+        self.show_comparison(message.index)
 
-    def show_record_detail(self, record: dict, index: int) -> None:
-        """Push the record detail screen for the selected record.
+    def show_comparison(self, index: int) -> None:
+        """Push the comparison screen for the selected record.
 
         Args:
-            record: The full record dictionary to display.
-            index: The index of the record in the dataset.
+            index: The index of the record to compare.
         """
-        self.push_screen(RecordDetailScreen(record, index))
+        self.push_screen(ComparisonScreen(self.filename, index))
 
 
 def main() -> None:
     """Parse arguments and run the application."""
     parser = argparse.ArgumentParser(
-        description="Explore JSONL datasets in a terminal UI"
+        description="Compare original and processed JSONL records in a terminal UI"
     )
     parser.add_argument(
         "filename",
@@ -203,7 +181,7 @@ def main() -> None:
         print(f"Error: Permission denied: {args.filename}", file=sys.stderr)
         sys.exit(1)
 
-    app = DatasetExplorerApp(args.filename)
+    app = JsonComparisonApp(args.filename)
     app.run()
 
 
