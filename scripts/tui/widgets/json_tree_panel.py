@@ -15,6 +15,13 @@ from textual.widgets import Tree
 from textual.widgets.tree import TreeNode
 
 
+# Maximum depth for recursive tree operations to prevent stack overflow
+MAX_TREE_DEPTH = 100
+
+# Maximum string length to process before truncation (prevents memory issues with huge strings)
+MAX_STRING_PROCESS_LENGTH = 10000
+
+
 class JsonTreePanel(Tree[str]):
     """
     JSON tree widget with support for synchronized scrolling and diff highlighting.
@@ -142,14 +149,18 @@ class JsonTreePanel(Tree[str]):
 
     def _apply_diff_highlighting(self) -> None:
         """Apply diff CSS classes to all nodes based on the diff map."""
-        self._apply_diff_to_node(self.root)
+        self._apply_diff_to_node(self.root, depth=0)
 
-    def _apply_diff_to_node(self, node: TreeNode[str]) -> None:
+    def _apply_diff_to_node(self, node: TreeNode[str], depth: int = 0) -> None:
         """Recursively apply diff highlighting to a node and its children.
 
         Args:
             node: The tree node to apply highlighting to.
+            depth: Current recursion depth (used to prevent stack overflow).
         """
+        if depth >= MAX_TREE_DEPTH:
+            return  # Stop recursion at max depth
+
         # Get the JSON path for this node
         json_path = self._node_paths.get(node, "")
 
@@ -164,23 +175,27 @@ class JsonTreePanel(Tree[str]):
 
         # Recurse to children
         for child in node.children:
-            self._apply_diff_to_node(child)
+            self._apply_diff_to_node(child, depth + 1)
 
     def clear_diff_highlighting(self) -> None:
         """Remove all diff highlighting from nodes."""
-        self._clear_diff_from_node(self.root)
+        self._clear_diff_from_node(self.root, depth=0)
 
-    def _clear_diff_from_node(self, node: TreeNode[str]) -> None:
+    def _clear_diff_from_node(self, node: TreeNode[str], depth: int = 0) -> None:
         """Recursively remove diff classes from a node and its children.
 
         Args:
             node: The tree node to clear highlighting from.
+            depth: Current recursion depth (used to prevent stack overflow).
         """
+        if depth >= MAX_TREE_DEPTH:
+            return  # Stop recursion at max depth
+
         for css_class in ["diff-unchanged", "diff-changed", "diff-removed", "diff-added"]:
             node.remove_class(css_class)
 
         for child in node.children:
-            self._clear_diff_from_node(child)
+            self._clear_diff_from_node(child, depth + 1)
 
     def load_json(self, data: dict[str, Any], label: str = "root") -> None:
         """
@@ -196,7 +211,7 @@ class JsonTreePanel(Tree[str]):
         self._node_paths.clear()
         self._node_data.clear()
         self.root.set_label(label)
-        self._add_json_recursive(self.root, data, json_path="")
+        self._add_json_recursive(self.root, data, json_path="", depth=0)
         self.root.expand()
 
     def sync_scroll_to(self, scroll_y: int) -> None:
@@ -292,6 +307,7 @@ class JsonTreePanel(Tree[str]):
         data: Any,
         key: str | None = None,
         json_path: str = "",
+        depth: int = 0,
     ) -> None:
         """
         Recursively add JSON data to the tree.
@@ -301,11 +317,17 @@ class JsonTreePanel(Tree[str]):
             data: The JSON data to add.
             key: The key name if this is a value in an object.
             json_path: The JSON path to this node (for diff highlighting).
+            depth: Current recursion depth (used to prevent stack overflow).
         """
+        if depth >= MAX_TREE_DEPTH:
+            # Add a placeholder node indicating truncation
+            node.add_leaf(f"... (depth limit {MAX_TREE_DEPTH} reached)")
+            return
+
         if isinstance(data, dict):
-            self._add_object(node, data, key, json_path)
+            self._add_object(node, data, key, json_path, depth)
         elif isinstance(data, list):
-            self._add_array(node, data, key, json_path)
+            self._add_array(node, data, key, json_path, depth)
         else:
             self._add_primitive(node, data, key, json_path)
 
@@ -315,6 +337,7 @@ class JsonTreePanel(Tree[str]):
         data: dict[str, Any],
         key: str | None = None,
         json_path: str = "",
+        depth: int = 0,
     ) -> None:
         """
         Add a JSON object to the tree.
@@ -326,6 +349,7 @@ class JsonTreePanel(Tree[str]):
             data: The object data.
             key: The key name if this object is a value in a parent object.
             json_path: The JSON path to this node.
+            depth: Current recursion depth.
         """
         if key is not None:
             label = f"{{}} {key}"
@@ -345,7 +369,7 @@ class JsonTreePanel(Tree[str]):
 
         for obj_key, obj_value in data.items():
             child_path = f"{json_path}.{obj_key}" if json_path else obj_key
-            self._add_json_recursive(child, obj_value, obj_key, child_path)
+            self._add_json_recursive(child, obj_value, obj_key, child_path, depth + 1)
 
     def _add_array(
         self,
@@ -353,6 +377,7 @@ class JsonTreePanel(Tree[str]):
         data: list[Any],
         key: str | None = None,
         json_path: str = "",
+        depth: int = 0,
     ) -> None:
         """
         Add a JSON array to the tree.
@@ -364,6 +389,7 @@ class JsonTreePanel(Tree[str]):
             data: The array data.
             key: The key name if this array is a value in a parent object.
             json_path: The JSON path to this node.
+            depth: Current recursion depth.
         """
         count = len(data)
         items_label = "item" if count == 1 else "items"
@@ -381,7 +407,7 @@ class JsonTreePanel(Tree[str]):
 
         for idx, item in enumerate(data):
             child_path = f"{json_path}[{idx}]"
-            self._add_json_recursive(child, item, f"[{idx}]", child_path)
+            self._add_json_recursive(child, item, f"[{idx}]", child_path, depth + 1)
 
     def _add_primitive(
         self,
@@ -406,8 +432,10 @@ class JsonTreePanel(Tree[str]):
         elif isinstance(data, bool):
             value_str = "true" if data else "false"
         elif isinstance(data, str):
+            # Limit string processing to prevent memory issues with huge strings
+            process_str = data[:MAX_STRING_PROCESS_LENGTH] if len(data) > MAX_STRING_PROCESS_LENGTH else data
             # Escape special characters for display (before truncation for accurate length)
-            display_str = data.replace('\\', '\\\\').replace('\n', '\\n').replace('\r', '\\r').replace('\t', '\\t').replace('"', '\\"')
+            display_str = process_str.replace('\\', '\\\\').replace('\n', '\\n').replace('\r', '\\r').replace('\t', '\\t').replace('"', '\\"')
             # Truncate long strings for display
             if len(display_str) > 50:
                 display_str = display_str[:47] + "..."

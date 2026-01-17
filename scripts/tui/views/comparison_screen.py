@@ -16,6 +16,9 @@ from textual.screen import Screen
 from textual.widgets import Footer, Header, Static
 
 from scripts.tui.data_loader import load_record_pair
+
+# Maximum recursion depth for expand/collapse operations
+MAX_TREE_DEPTH = 50
 from scripts.tui.widgets import FieldDetailModal
 from scripts.tui.widgets.diff_indicator import calculate_diff
 from scripts.tui.widgets.json_tree_panel import JsonTreePanel
@@ -143,8 +146,13 @@ class ComparisonScreen(Screen):
     def _load_comparison_data(self) -> None:
         """Load the original and processed records and display them."""
         try:
+            # Use cached records from app if available
+            cached_records = None
+            if hasattr(self.app, 'records') and self.app.records:
+                cached_records = self.app.records
+
             self._original, self._processed = load_record_pair(
-                self._filename, self._record_index
+                self._filename, self._record_index, cached_records=cached_records
             )
         except (FileNotFoundError, IndexError) as e:
             # Show error in both panels
@@ -263,16 +271,32 @@ class ComparisonScreen(Screen):
 
         self.notify("Collapsed all nodes")
 
-    def _expand_all_nodes(self, node: Any) -> None:
-        """Recursively expand all nodes starting from the given node."""
+    def _expand_all_nodes(self, node: Any, depth: int = 0) -> None:
+        """Recursively expand all nodes starting from the given node.
+
+        Args:
+            node: The tree node to expand.
+            depth: Current recursion depth (used to prevent stack overflow).
+        """
+        if depth >= MAX_TREE_DEPTH:
+            return  # Stop recursion at max depth to prevent stack overflow
+
         node.expand()
         for child in node.children:
-            self._expand_all_nodes(child)
+            self._expand_all_nodes(child, depth + 1)
 
-    def _collapse_all_nodes(self, node: Any) -> None:
-        """Recursively collapse all nodes starting from the given node."""
+    def _collapse_all_nodes(self, node: Any, depth: int = 0) -> None:
+        """Recursively collapse all nodes starting from the given node.
+
+        Args:
+            node: The tree node to collapse.
+            depth: Current recursion depth (used to prevent stack overflow).
+        """
+        if depth >= MAX_TREE_DEPTH:
+            return  # Stop recursion at max depth to prevent stack overflow
+
         for child in node.children:
-            self._collapse_all_nodes(child)
+            self._collapse_all_nodes(child, depth + 1)
         if not node.is_root:
             node.collapse()
 

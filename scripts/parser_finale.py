@@ -37,6 +37,9 @@ def process_messages(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
             # Preserve tool_calls as-is if present
             if "tool_calls" in msg:
                 processed_msg["tool_calls"] = msg["tool_calls"]
+            # Preserve reasoning_content as empty string if present
+            if "reasoning_content" in msg:
+                processed_msg["reasoning_content"] = ""
             result.append(processed_msg)
         else:
             # Keep other messages as-is

@@ -331,8 +331,8 @@ class TestProcessRecordReasoningField:
         assert "reasoning" in result
         assert result["reasoning"] is None
 
-    def test_reasoning_content_in_messages_stripped(self):
-        """reasoning_content in assistant messages should be stripped."""
+    def test_reasoning_content_in_messages_emptied(self):
+        """reasoning_content in assistant messages should be emptied."""
         record = {
             "uuid": "test-019",
             "messages": [
@@ -348,7 +348,7 @@ class TestProcessRecordReasoningField:
             "reasoning": "on"
         }
         result = process_record(record)
-        assert "reasoning_content" not in result["messages"][0]
+        assert result["messages"][0]["reasoning_content"] == ""
 
 
 class TestProcessRecordFieldTypes:

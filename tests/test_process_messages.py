@@ -104,8 +104,8 @@ class TestProcessMessagesAssistantVariations:
         assert len(result[0]["tool_calls"]) == 3
         assert result[0]["tool_calls"] == tool_calls
 
-    def test_assistant_reasoning_content_stripped(self):
-        """Assistant's reasoning_content should be stripped (not preserved)."""
+    def test_assistant_reasoning_content_emptied(self):
+        """Assistant's reasoning_content should be emptied but preserved."""
         messages = [{
             "role": "assistant",
             "content": "My answer",
@@ -113,7 +113,7 @@ class TestProcessMessagesAssistantVariations:
         }]
         result = process_messages(messages)
         assert result[0]["content"] == ""
-        assert "reasoning_content" not in result[0]
+        assert result[0]["reasoning_content"] == ""
 
     def test_assistant_extra_fields_stripped(self):
         """Extra fields on assistant messages should be stripped."""

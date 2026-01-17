@@ -16,7 +16,7 @@ For each **assistant message**:
 |-------|--------------|
 | `content` | **Emptied** (set to `""`) |
 | `tool_calls` | **Preserved** as-is |
-| `reasoning_content` | **Dropped** (not copied) |
+| `reasoning_content` | **Emptied** (set to `""`) |
 
 All other messages (system, user, tool) pass through **unchanged**.
 
@@ -199,7 +199,8 @@ uv run python -m scripts.parser_finale dataset/conversations.jsonl -i 42 -f mark
     {
       "role": "assistant",
       "content": "",
-      "tool_calls": [{"id": "call_1", "function": {"name": "get_weather"}}]
+      "tool_calls": [{"id": "call_1", "function": {"name": "get_weather"}}],
+      "reasoning_content": ""
     },
     {"role": "tool", "content": "Sunny, 72°F"},
     {"role": "assistant", "content": ""}
@@ -211,4 +212,4 @@ Note:
 - Assistant messages are **kept** (not removed)
 - `content` is now **empty** (`""`)
 - `tool_calls` are **preserved** exactly
-- `reasoning_content` is **removed**
+- `reasoning_content` is **emptied** (set to `""`)

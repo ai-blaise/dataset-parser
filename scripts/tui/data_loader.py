@@ -16,9 +16,48 @@ Record Structure:
 from __future__ import annotations
 
 import json
-from typing import Any, Iterator
+from typing import Any, Iterator, Callable
 
 from scripts.parser_finale import process_record
+
+
+# Global cache for loaded records to prevent multiple file reads
+_record_cache: dict[str, list[dict[str, Any]]] = {}
+
+
+def get_cached_records(filename: str) -> list[dict[str, Any]] | None:
+    """Get records from cache if available.
+
+    Args:
+        filename: Path to the JSONL file.
+
+    Returns:
+        Cached records or None if not cached.
+    """
+    return _record_cache.get(filename)
+
+
+def set_cached_records(filename: str, records: list[dict[str, Any]]) -> None:
+    """Store records in cache.
+
+    Args:
+        filename: Path to the JSONL file.
+        records: The records to cache.
+    """
+    _record_cache[filename] = records
+
+
+def clear_cache(filename: str | None = None) -> None:
+    """Clear the record cache.
+
+    Args:
+        filename: If provided, only clear cache for this file.
+                  If None, clear all cached records.
+    """
+    if filename:
+        _record_cache.pop(filename, None)
+    else:
+        _record_cache.clear()
 
 
 def truncate(text: str, max_len: int) -> str:
@@ -74,7 +113,12 @@ def load_jsonl(filename: str) -> Iterator[dict[str, Any]]:
                 yield json.loads(line)
 
 
-def load_all_records(filename: str) -> list[dict[str, Any]]:
+def load_all_records(
+    filename: str,
+    use_cache: bool = True,
+    progress_callback: Callable[[int, int | None], None] | None = None,
+    max_records: int | None = None,
+) -> list[dict[str, Any]]:
     """
     Load all records from a JSONL file into memory.
 
@@ -83,6 +127,10 @@ def load_all_records(filename: str) -> list[dict[str, Any]]:
 
     Args:
         filename: Path to the JSONL file.
+        use_cache: Whether to use cached records if available (default True).
+        progress_callback: Optional callback(loaded_count, total_count) for progress updates.
+                          total_count may be None if unknown.
+        max_records: Maximum number of records to load (None = all).
 
     Returns:
         A list of all records as dictionaries.
@@ -95,7 +143,63 @@ def load_all_records(filename: str) -> list[dict[str, Any]]:
         >>> records = load_all_records("data.jsonl")
         >>> print(f"Loaded {len(records)} records")
     """
-    return list(load_jsonl(filename))
+    # Check cache first
+    if use_cache:
+        cached = get_cached_records(filename)
+        if cached is not None:
+            if max_records is not None:
+                return cached[:max_records]
+            return cached
+
+    # Load records with optional progress reporting
+    records: list[dict[str, Any]] = []
+    for i, record in enumerate(load_jsonl(filename)):
+        if max_records is not None and i >= max_records:
+            break
+        records.append(record)
+        if progress_callback is not None and i % 1000 == 0:
+            progress_callback(i + 1, None)
+
+    # Cache the full load (only if we loaded all records)
+    if use_cache and max_records is None:
+        set_cached_records(filename, records)
+
+    if progress_callback is not None:
+        progress_callback(len(records), len(records))
+
+    return records
+
+
+def load_record_at_index(filename: str, index: int) -> dict[str, Any]:
+    """
+    Load a single record at a specific index efficiently.
+
+    Uses cached records if available, otherwise reads from file.
+
+    Args:
+        filename: Path to the JSONL file.
+        index: The index of the record to load.
+
+    Returns:
+        The record at the given index.
+
+    Raises:
+        FileNotFoundError: If the file does not exist.
+        IndexError: If the index is out of range.
+    """
+    # Try cache first
+    cached = get_cached_records(filename)
+    if cached is not None:
+        if index < 0 or index >= len(cached):
+            raise IndexError(f"Record index {index} out of range (0-{len(cached) - 1})")
+        return cached[index]
+
+    # Fall back to streaming read (more memory efficient for single record)
+    for i, record in enumerate(load_jsonl(filename)):
+        if i == index:
+            return record
+
+    raise IndexError(f"Record index {index} out of range")
 
 
 def get_record_summary(record: dict[str, Any], idx: int) -> dict[str, Any]:
@@ -152,7 +256,11 @@ def get_record_summary(record: dict[str, Any], idx: int) -> dict[str, Any]:
     }
 
 
-def load_record_pair(filename: str, index: int) -> tuple[dict[str, Any], dict[str, Any]]:
+def load_record_pair(
+    filename: str,
+    index: int,
+    cached_records: list[dict[str, Any]] | None = None,
+) -> tuple[dict[str, Any], dict[str, Any]]:
     """
     Load a single record and return both original and processed versions.
 
@@ -162,6 +270,7 @@ def load_record_pair(filename: str, index: int) -> tuple[dict[str, Any], dict[st
     Args:
         filename: Path to the JSONL file.
         index: The index of the record to load.
+        cached_records: Optional pre-loaded records list to use instead of file.
 
     Returns:
         A tuple of (original_record, processed_record) where:
@@ -178,10 +287,14 @@ def load_record_pair(filename: str, index: int) -> tuple[dict[str, Any], dict[st
         >>> print(original["messages"][0]["content"])  # Full content
         >>> print(processed["messages"][0]["content"])  # Empty if assistant
     """
-    records = load_all_records(filename)
-    if index < 0 or index >= len(records):
-        raise IndexError(f"Record index {index} out of range (0-{len(records) - 1})")
-    original = records[index]
+    # Use provided cached records, global cache, or load from file
+    if cached_records is not None:
+        if index < 0 or index >= len(cached_records):
+            raise IndexError(f"Record index {index} out of range (0-{len(cached_records) - 1})")
+        original = cached_records[index]
+    else:
+        original = load_record_at_index(filename, index)
+
     processed = process_record(original)
     return (original, processed)
 

@@ -15,7 +15,7 @@ from textual.message import Message
 from textual.screen import Screen
 from textual.widgets import DataTable, Footer, Header
 
-from scripts.tui.data_loader import load_all_records, get_record_summary
+from scripts.tui.data_loader import get_record_summary
 
 
 class RecordListScreen(Screen):
@@ -127,19 +127,16 @@ class RecordListScreen(Screen):
         table.add_column("TOOLS", key="tools", width=6)
         table.add_column("PREVIEW", key="preview")
 
-        # Load records
-        filename = self.filename
-        if not filename:
-            table.add_row("--", "No file specified", "--", "--", "--")
+        # Use records from app (already loaded and cached)
+        if hasattr(self.app, 'records') and self.app.records:
+            self._records = self.app.records
+        else:
+            # Fallback: no records available
+            table.add_row("--", "No records loaded", "--", "--", "--")
             return
 
-        try:
-            self._records = load_all_records(filename)
-        except FileNotFoundError:
-            table.add_row("--", f"File not found: {filename}", "--", "--", "--")
-            return
-        except Exception as e:
-            table.add_row("--", f"Error: {e}", "--", "--", "--")
+        if not self._records:
+            table.add_row("--", "No records found", "--", "--", "--")
             return
 
         # Populate table with record summaries

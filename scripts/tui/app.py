@@ -6,14 +6,69 @@ with parser_finale processed output side-by-side.
 """
 
 import argparse
+import os
 import sys
 
 from textual.app import App
 from textual.binding import Binding
+from textual.screen import Screen
+from textual.widgets import Static, ProgressBar, Footer, Header
+from textual.containers import Center, Middle
+from textual import work
 
 from scripts.tui.views.record_list import RecordListScreen
 from scripts.tui.views.comparison_screen import ComparisonScreen
-from scripts.tui.data_loader import load_all_records
+from scripts.tui.data_loader import load_all_records, load_jsonl, set_cached_records
+
+
+# Maximum file size (in bytes) for synchronous loading (100 MB)
+MAX_SYNC_LOAD_SIZE = 100 * 1024 * 1024
+
+
+class LoadingScreen(Screen):
+    """Screen displayed while loading large files."""
+
+    CSS = """
+    LoadingScreen {
+        align: center middle;
+    }
+
+    #loading-container {
+        width: 60;
+        height: 10;
+        border: solid $primary;
+        padding: 1 2;
+    }
+
+    #loading-text {
+        text-align: center;
+        margin-bottom: 1;
+    }
+
+    #loading-progress {
+        text-align: center;
+        color: $text-muted;
+    }
+    """
+
+    def __init__(self, filename: str) -> None:
+        super().__init__()
+        self.filename = filename
+        self._loaded_count = 0
+
+    def compose(self):
+        yield Header()
+        with Center():
+            with Middle(id="loading-container"):
+                yield Static("Loading records...", id="loading-text")
+                yield Static("0 records loaded", id="loading-progress")
+        yield Footer()
+
+    def update_progress(self, count: int) -> None:
+        """Update the loading progress display."""
+        self._loaded_count = count
+        progress = self.query_one("#loading-progress", Static)
+        progress.update(f"{count:,} records loaded")
 
 
 class JsonComparisonApp(App):
@@ -138,10 +193,70 @@ class JsonComparisonApp(App):
         super().__init__()
         self.filename = filename
         self.records: list[dict] = []
+        self._loading = False
 
     def on_mount(self) -> None:
         """Load data and push the record list screen."""
-        self.records = load_all_records(self.filename)
+        # Check file size to decide loading strategy
+        try:
+            file_size = os.path.getsize(self.filename)
+        except OSError:
+            file_size = 0
+
+        if file_size > MAX_SYNC_LOAD_SIZE:
+            # Large file - use async loading with progress
+            self._loading = True
+            self.push_screen(LoadingScreen(self.filename))
+            self._load_records_async()
+        else:
+            # Small file - load synchronously
+            try:
+                self.records = load_all_records(self.filename)
+            except Exception as e:
+                self.notify(f"Error loading file: {e}", severity="error")
+                self.records = []
+            self.push_screen(RecordListScreen())
+
+    @work(thread=True)
+    def _load_records_async(self) -> None:
+        """Load records in a background thread for large files."""
+        records: list[dict] = []
+        try:
+            for i, record in enumerate(load_jsonl(self.filename)):
+                records.append(record)
+                # Update progress every 1000 records
+                if i % 1000 == 0:
+                    self.call_from_thread(self._update_loading_progress, i + 1)
+
+            # Cache the loaded records
+            set_cached_records(self.filename, records)
+            self.records = records
+            self.call_from_thread(self._loading_complete)
+        except Exception as e:
+            self.call_from_thread(self._loading_error, str(e))
+
+    def _update_loading_progress(self, count: int) -> None:
+        """Update the loading screen progress."""
+        try:
+            screen = self.screen
+            if isinstance(screen, LoadingScreen):
+                screen.update_progress(count)
+        except Exception:
+            pass
+
+    def _loading_complete(self) -> None:
+        """Called when async loading is complete."""
+        self._loading = False
+        self.pop_screen()  # Remove loading screen
+        self.push_screen(RecordListScreen())
+        self.notify(f"Loaded {len(self.records):,} records")
+
+    def _loading_error(self, error: str) -> None:
+        """Called when async loading fails."""
+        self._loading = False
+        self.notify(f"Error loading file: {error}", severity="error")
+        self.pop_screen()  # Remove loading screen
+        self.records = []
         self.push_screen(RecordListScreen())
 
     def on_record_list_screen_record_selected(

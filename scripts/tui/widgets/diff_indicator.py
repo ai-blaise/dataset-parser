@@ -16,10 +16,15 @@ from __future__ import annotations
 from typing import Any
 
 
+# Maximum recursion depth for diff calculation to prevent stack overflow
+MAX_DIFF_DEPTH = 100
+
+
 def calculate_diff(
     original: dict[str, Any],
     processed: dict[str, Any],
     path: str = "",
+    depth: int = 0,
 ) -> dict[str, str]:
     """
     Calculate differences between original and processed JSON structures.
@@ -36,6 +41,7 @@ def calculate_diff(
         original: The original JSON record.
         processed: The processed JSON record (after parser_finale).
         path: The current path prefix (used for recursion).
+        depth: Current recursion depth (used to prevent stack overflow).
 
     Returns:
         A dictionary mapping JSON paths to diff types:
@@ -51,10 +57,16 @@ def calculate_diff(
     """
     diff_map: dict[str, str] = {}
 
+    # Stop recursion at max depth to prevent stack overflow
+    if depth >= MAX_DIFF_DEPTH:
+        if path:
+            diff_map[path] = "unchanged"  # Assume unchanged at max depth
+        return diff_map
+
     if isinstance(original, dict) and isinstance(processed, dict):
-        _compare_dicts(original, processed, path, diff_map)
+        _compare_dicts(original, processed, path, diff_map, depth)
     elif isinstance(original, list) and isinstance(processed, list):
-        _compare_lists(original, processed, path, diff_map)
+        _compare_lists(original, processed, path, diff_map, depth)
     else:
         _compare_primitives(original, processed, path, diff_map)
 
@@ -66,6 +78,7 @@ def _compare_dicts(
     processed: dict[str, Any],
     path: str,
     diff_map: dict[str, str],
+    depth: int = 0,
 ) -> None:
     """
     Compare two dictionaries and populate the diff map.
@@ -75,6 +88,7 @@ def _compare_dicts(
         processed: The processed dictionary.
         path: The current JSON path.
         diff_map: The diff map to populate.
+        depth: Current recursion depth.
     """
     all_keys = set(original.keys()) | set(processed.keys())
 
@@ -85,17 +99,17 @@ def _compare_dicts(
             # Key was removed
             diff_map[key_path] = "removed"
             # Mark all nested paths as removed too
-            _mark_all_removed(original[key], key_path, diff_map)
+            _mark_all_removed(original[key], key_path, diff_map, depth + 1)
         elif key not in original and key in processed:
             # Key was added
             diff_map[key_path] = "added"
             # Mark all nested paths as added too
-            _mark_all_added(processed[key], key_path, diff_map)
+            _mark_all_added(processed[key], key_path, diff_map, depth + 1)
         else:
             # Key exists in both - recurse
             orig_value = original[key]
             proc_value = processed[key]
-            nested_diff = calculate_diff(orig_value, proc_value, key_path)
+            nested_diff = calculate_diff(orig_value, proc_value, key_path, depth + 1)
             diff_map.update(nested_diff)
 
 
@@ -104,6 +118,7 @@ def _compare_lists(
     processed: list[Any],
     path: str,
     diff_map: dict[str, str],
+    depth: int = 0,
 ) -> None:
     """
     Compare two lists and populate the diff map.
@@ -113,6 +128,7 @@ def _compare_lists(
         processed: The processed list.
         path: The current JSON path.
         diff_map: The diff map to populate.
+        depth: Current recursion depth.
     """
     max_len = max(len(original), len(processed))
 
@@ -122,14 +138,14 @@ def _compare_lists(
         if idx >= len(original):
             # Item was added
             diff_map[item_path] = "added"
-            _mark_all_added(processed[idx], item_path, diff_map)
+            _mark_all_added(processed[idx], item_path, diff_map, depth + 1)
         elif idx >= len(processed):
             # Item was removed
             diff_map[item_path] = "removed"
-            _mark_all_removed(original[idx], item_path, diff_map)
+            _mark_all_removed(original[idx], item_path, diff_map, depth + 1)
         else:
             # Item exists in both - recurse
-            nested_diff = calculate_diff(original[idx], processed[idx], item_path)
+            nested_diff = calculate_diff(original[idx], processed[idx], item_path, depth + 1)
             diff_map.update(nested_diff)
 
 
@@ -155,7 +171,7 @@ def _compare_primitives(
             diff_map[path] = "changed"
 
 
-def _mark_all_removed(value: Any, path: str, diff_map: dict[str, str]) -> None:
+def _mark_all_removed(value: Any, path: str, diff_map: dict[str, str], depth: int = 0) -> None:
     """
     Mark all nested paths as removed.
 
@@ -163,20 +179,24 @@ def _mark_all_removed(value: Any, path: str, diff_map: dict[str, str]) -> None:
         value: The value whose nested paths should be marked.
         path: The current JSON path.
         diff_map: The diff map to populate.
+        depth: Current recursion depth.
     """
+    if depth >= MAX_DIFF_DEPTH:
+        return  # Stop recursion at max depth
+
     if isinstance(value, dict):
         for key, nested_value in value.items():
             nested_path = f"{path}.{key}"
             diff_map[nested_path] = "removed"
-            _mark_all_removed(nested_value, nested_path, diff_map)
+            _mark_all_removed(nested_value, nested_path, diff_map, depth + 1)
     elif isinstance(value, list):
         for idx, item in enumerate(value):
             item_path = f"{path}[{idx}]"
             diff_map[item_path] = "removed"
-            _mark_all_removed(item, item_path, diff_map)
+            _mark_all_removed(item, item_path, diff_map, depth + 1)
 
 
-def _mark_all_added(value: Any, path: str, diff_map: dict[str, str]) -> None:
+def _mark_all_added(value: Any, path: str, diff_map: dict[str, str], depth: int = 0) -> None:
     """
     Mark all nested paths as added.
 
@@ -184,17 +204,21 @@ def _mark_all_added(value: Any, path: str, diff_map: dict[str, str]) -> None:
         value: The value whose nested paths should be marked.
         path: The current JSON path.
         diff_map: The diff map to populate.
+        depth: Current recursion depth.
     """
+    if depth >= MAX_DIFF_DEPTH:
+        return  # Stop recursion at max depth
+
     if isinstance(value, dict):
         for key, nested_value in value.items():
             nested_path = f"{path}.{key}"
             diff_map[nested_path] = "added"
-            _mark_all_added(nested_value, nested_path, diff_map)
+            _mark_all_added(nested_value, nested_path, diff_map, depth + 1)
     elif isinstance(value, list):
         for idx, item in enumerate(value):
             item_path = f"{path}[{idx}]"
             diff_map[item_path] = "added"
-            _mark_all_added(item, item_path, diff_map)
+            _mark_all_added(item, item_path, diff_map, depth + 1)
 
 
 def get_node_diff_class(path: str, diff_map: dict[str, str]) -> str:
