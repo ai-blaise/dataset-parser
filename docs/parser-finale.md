@@ -1,6 +1,6 @@
 # Parser Finale
 
-Parser Finale processes JSONL records by removing assistant message content while preserving the overall structure. This is useful for extracting training prompts or analyzing input data without model responses.
+Parser Finale processes JSONL records by modifying assistant messages while preserving the conversation structure.
 
 ## Running Parser Finale
 
@@ -8,21 +8,28 @@ Parser Finale processes JSONL records by removing assistant message content whil
 uv run python -m scripts.parser_finale <file> [options]
 ```
 
-## What's Included in Output
+## Transformation Behavior
+
+For each **assistant message**:
+
+| Field | What Happens |
+|-------|--------------|
+| `content` | **Emptied** (set to `""`) |
+| `tool_calls` | **Preserved** as-is |
+| `reasoning_content` | **Dropped** (not copied) |
+
+All other messages (system, user, tool) pass through **unchanged**.
+
+## Record-Level Fields
+
+These fields are preserved in the output:
 
 - `uuid` - Record identifier
-- `messages` - Only system, user, and tool messages (assistant messages excluded)
+- `messages` - All messages (assistant messages modified as above)
 - `tools` - Full tool definitions
 - `license` - License information
 - `used_in` - Usage tracking
-- `reasoning` - Reasoning flag (if present in original)
-
-## What's Excluded
-
-- All `assistant` messages, including:
-  - Message content
-  - Tool calls
-  - Reasoning content
+- `reasoning` - Reasoning flag (if present)
 
 ## Options
 
@@ -161,37 +168,47 @@ Examine a single record in detail:
 uv run python -m scripts.parser_finale dataset/conversations.jsonl -i 42 -f markdown
 ```
 
-## Transformation Details
+## Transformation Example
 
-The parser finale transformation:
-
-1. **Reads** the original record
-2. **Preserves** uuid, tools, license, used_in, reasoning fields
-3. **Filters** messages to exclude those with `role: "assistant"`
-4. **Outputs** the processed record in the specified format
-
-Original record:
+**Original record:**
 
 ```json
 {
   "messages": [
-    {"role": "system", "content": "..."},
-    {"role": "user", "content": "..."},
-    {"role": "assistant", "content": "...", "tool_calls": [...]},
-    {"role": "tool", "content": "..."},
-    {"role": "assistant", "content": "..."}
+    {"role": "system", "content": "You are a helpful assistant."},
+    {"role": "user", "content": "What's the weather?"},
+    {
+      "role": "assistant",
+      "content": "Let me check the weather for you.",
+      "tool_calls": [{"id": "call_1", "function": {"name": "get_weather"}}],
+      "reasoning_content": "User wants weather info, I should use the tool."
+    },
+    {"role": "tool", "content": "Sunny, 72°F"},
+    {"role": "assistant", "content": "The weather is sunny and 72°F."}
   ]
 }
 ```
 
-Processed record:
+**Processed record:**
 
 ```json
 {
   "messages": [
-    {"role": "system", "content": "..."},
-    {"role": "user", "content": "..."},
-    {"role": "tool", "content": "..."}
+    {"role": "system", "content": "You are a helpful assistant."},
+    {"role": "user", "content": "What's the weather?"},
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [{"id": "call_1", "function": {"name": "get_weather"}}]
+    },
+    {"role": "tool", "content": "Sunny, 72°F"},
+    {"role": "assistant", "content": ""}
   ]
 }
 ```
+
+Note:
+- Assistant messages are **kept** (not removed)
+- `content` is now **empty** (`""`)
+- `tool_calls` are **preserved** exactly
+- `reasoning_content` is **removed**

@@ -16,14 +16,41 @@ uv run python -m scripts.tui.app dataset/conversations.jsonl
 
 ## Keybindings
 
+### Global
+
 | Key | Action |
 |-----|--------|
-| `Enter` | View full record details (Messages, Tools, Metadata tabs) |
-| `m` | Show field detail modal for current cell |
 | `q` | Quit application |
-| `ESC` | Close modal / Go back to list |
-| `Tab` | Switch tabs in detail view |
-| `Arrow keys` | Navigate cells in the table |
+
+### Record List Screen
+
+| Key | Action |
+|-----|--------|
+| `↑/↓` | Navigate records |
+| `Enter` | Open comparison view |
+
+### Comparison Screen
+
+| Key | Action |
+|-----|--------|
+| `ESC` / `b` | Back to record list |
+| `Tab` | Switch panel focus |
+| `←` | Focus left panel |
+| `→` | Focus right panel |
+| `s` | Toggle sync scroll |
+| `d` | Toggle diff highlighting |
+| `m` | Show field detail modal |
+| `e` | Expand all nodes |
+| `c` | Collapse all nodes |
+| `↑/↓` | Navigate tree nodes |
+| `Enter` | Expand/collapse node |
+
+### Field Detail Modal
+
+| Key | Action |
+|-----|--------|
+| `ESC` / `Enter` | Close modal |
+| `q` | Quit application |
 
 ## Screens
 
@@ -82,7 +109,7 @@ Press `m` on any cell to see detailed information:
 
 1. Launch the TUI with your dataset file
 2. Use arrow keys to navigate the record list
-3. Press `f` to preview fields without leaving the list
+3. Press `m` to preview fields without leaving the list
 4. Press `Enter` to view full record details
 
 ### Analyzing Differences
@@ -123,9 +150,9 @@ The TUI loads records efficiently, so large datasets are supported. Use the MSGS
 
 In the comparison view, changes are highlighted:
 
-- **Added content**: Shown in the processed panel only
-- **Removed content**: Shown in the original panel only (assistant messages)
-- **Changed content**: Highlighted in both panels
+- **Changed content**: Assistant `content` fields (emptied in processed)
+- **Removed content**: `reasoning_content` fields (dropped in processed)
+- **Unchanged content**: All other fields (system, user, tool messages, tool_calls)
 
 ### JSON Tree
 
