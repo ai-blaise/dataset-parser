@@ -45,24 +45,6 @@ uv run python -m scripts.tui.app dataset/conversations.jsonl
 uv run python -m scripts.tui.app dataset/
 ```
 
-### List records
-
-```bash
-uv run python scripts/main.py list dataset/conversations.jsonl -n 10
-```
-
-### View a specific record
-
-```bash
-uv run python scripts/main.py show dataset/conversations.jsonl 0
-```
-
-### Search for content
-
-```bash
-uv run python scripts/main.py search dataset/conversations.jsonl "query" -c
-```
-
 ### Extract prompts (remove assistant responses)
 
 ```bash
