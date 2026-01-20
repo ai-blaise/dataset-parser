@@ -1,6 +1,6 @@
 # data-gen
 
-A toolkit for exploring and transforming JSONL datasets containing AI conversation data. Provides CLI tools, a transformation engine, and an interactive terminal UI.
+A toolkit for exploring and transforming datasets containing AI conversation data. Provides CLI tools and an interactive TUI.
 
 ## Features
 
