@@ -200,19 +200,69 @@ uv run python scripts/main.py stats dataset/conversations.jsonl -v
 
 ---
 
-## Tips
+## Parser Finale
 
-### Piping Output
-
-Combine with standard Unix tools:
+The parser finale tool (`scripts/parser_finale.py`) processes dataset records and outputs content with emptied assistant responses.
 
 ```bash
-# Count records with tools
-uv run python scripts/main.py list dataset/file.jsonl --has-tools | wc -l
-
-# Save search results
-uv run python scripts/main.py search dataset/file.jsonl "query" > results.txt
+uv run python -m scripts.parser_finale <path> [options]
 ```
+
+### Arguments
+
+| Argument | Description |
+|----------|-------------|
+| `path` | Path to data file or directory of data files (JSONL, JSON, or Parquet) |
+
+### Options
+
+| Option | Description |
+|--------|-------------|
+| `--input-format` | Input format: auto, jsonl, json, parquet (default: auto) |
+| `-f, --format` | Output format: json, jsonl, parquet, markdown, text (default: json) |
+| `-o, --output` | Output file path (default: stdout) |
+| `-O, --output-dir` | Output directory for batch processing (default: parsed_datasets) |
+| `-i, --index` | Process only record at this index |
+| `--start` | Start index for range processing |
+| `--end` | End index for range processing |
+| `--has-tools` | Only include records with tools |
+| `--compact` | Compact JSON output (no indentation) |
+
+### Output Directory Mode
+
+When using `--output-dir` (or `-O`), the tool saves processed output to a file in the specified directory. The output filename follows the pattern: `{original_stem}_parsed.{format}`.
+
+**Example:**
+- Input: `dataset/train.jsonl`
+- Output: `parsed_datasets/train_parsed.json`
+
+If `-o` (specific output file) is provided, it takes precedence over `--output-dir`.
+
+### Examples
+
+```bash
+# Process file to stdout
+uv run python -m scripts.parser_finale dataset/train.jsonl
+
+# Process file to output directory
+uv run python -m scripts.parser_finale dataset/train.jsonl -O parsed_datasets
+
+# Process to specific file (overrides --output-dir)
+uv run python -m scripts.parser_finale dataset/train.jsonl -o output.json
+
+# Process as JSONL format to output directory
+uv run python -m scripts.parser_finale dataset/train.jsonl -f jsonl -O parsed_datasets
+
+# Process directory (launches TUI)
+uv run python -m scripts.parser_finale dataset/ -O parsed_datasets
+
+# Process only records with tools
+uv run python -m scripts.parser_finale dataset/train.jsonl --has-tools -O parsed_datasets
+```
+
+---
+
+## Tips
 
 ### Large Datasets
 

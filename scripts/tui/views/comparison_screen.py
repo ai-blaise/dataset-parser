@@ -9,13 +9,14 @@ from __future__ import annotations
 
 from typing import Any
 
+from textual import work
 from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
 from textual.screen import Screen
 from textual.widgets import Footer, Header, Static
 
-from scripts.tui.data_loader import load_record_pair
+from scripts.tui.data_loader import export_records, load_record_pair
 
 # Maximum recursion depth for expand/collapse operations
 MAX_TREE_DEPTH = 50
@@ -52,13 +53,24 @@ class ComparisonScreen(Screen):
     }
 
     .panel-header {
-        dock: top;
         height: 3;
+        width: 100%;
         background: $surface;
         border-bottom: solid $primary;
         text-align: center;
         text-style: bold;
         padding: 1;
+        content-align: center middle;
+    }
+
+    #left-panel .panel-header {
+        background: $primary;
+        color: auto;
+    }
+
+    #right-panel .panel-header {
+        background: $success;
+        color: auto;
     }
 
     #left-tree, #right-tree {
@@ -99,6 +111,7 @@ class ComparisonScreen(Screen):
         Binding("m", "show_field_detail", "View Field", show=True),
         Binding("e", "expand_all", "Expand All"),
         Binding("c", "collapse_all", "Collapse All"),
+        Binding("x", "export_record", "Export Record"),
     ]
 
     def __init__(
@@ -132,10 +145,10 @@ class ComparisonScreen(Screen):
         yield Header()
         with Horizontal(id="comparison-container"):
             with Vertical(id="left-panel"):
-                yield Static("ORIGINAL JSONL", classes="panel-header")
+                yield Static("Original Record", classes="panel-header")
                 yield JsonTreePanel(label="original", id="left-tree")
             with Vertical(id="right-panel"):
-                yield Static("PARSER_FINALE OUTPUT", classes="panel-header")
+                yield Static("Parsed Output", classes="panel-header")
                 yield JsonTreePanel(label="processed", id="right-tree")
         yield Footer()
 
@@ -271,6 +284,54 @@ class ComparisonScreen(Screen):
 
         self.notify("Collapsed all nodes")
 
+    def action_export_record(self) -> None:
+        """Export the current processed record to the output directory."""
+        # Import here to avoid circular imports
+        from scripts.tui.app import ExportingScreen
+
+        # Push the exporting screen
+        exporting_screen = ExportingScreen(title="Exporting Record...")
+        self.app.push_screen(exporting_screen)
+
+        # Start the background export
+        self._run_export_record(exporting_screen)
+
+    @work(thread=True)
+    def _run_export_record(self, exporting_screen: "ExportingScreen") -> None:
+        """Run the single record export in a background thread."""
+        output_dir = getattr(self.app, "_output_dir", None)
+        if not output_dir:
+            output_dir = "parsed_datasets"
+
+        self.app.call_from_thread(
+            exporting_screen.update_progress,
+            0,
+            1,
+            f"Record {self._record_index}",
+        )
+
+        try:
+            output_path = export_records(
+                records=[self._processed],
+                output_dir=output_dir,
+                source_filename=f"{self._filename}_record_{self._record_index}",
+                format="json",
+            )
+
+            message = f"Exported to {output_path}"
+            self.app.call_from_thread(exporting_screen.set_complete, message)
+
+        except Exception as e:
+            self.app.call_from_thread(
+                exporting_screen.set_complete,
+                f"Export failed: {e}",
+            )
+
+        # Pop the screen after a short delay to show completion
+        import time
+        time.sleep(1.0)
+        self.app.call_from_thread(self.app.pop_screen)
+
     def _expand_all_nodes(self, node: Any, depth: int = 0) -> None:
         """Recursively expand all nodes starting from the given node.
 
@@ -359,9 +420,9 @@ class ComparisonScreen(Screen):
         """
         # Determine which panel the message came from
         if message.panel_id == "left-tree":
-            panel_label = "ORIGINAL JSONL"
+            panel_label = "Original Record"
         else:
-            panel_label = "PARSER_FINALE OUTPUT"
+            panel_label = "Parsed Output"
 
         # Push the field detail modal with the node information
         self.app.push_screen(

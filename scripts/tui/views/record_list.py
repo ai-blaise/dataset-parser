@@ -9,13 +9,15 @@ from __future__ import annotations
 
 from typing import Any
 
+from textual import work
 from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.message import Message
 from textual.screen import Screen
 from textual.widgets import DataTable, Footer, Header
 
-from scripts.tui.data_loader import get_record_summary
+from scripts.tui.data_loader import export_records, get_record_summary
+from scripts.parser_finale import process_record
 
 
 class RecordListScreen(Screen):
@@ -56,7 +58,10 @@ class RecordListScreen(Screen):
     """
 
     BINDINGS = [
-        Binding("q", "quit", "Quit"),
+        Binding("q", "quit", "Quit", show=False),
+        Binding("escape", "go_back", "Back", show=True),
+        Binding("b", "go_back", "Back", show=False),
+        Binding("X", "export_all", "Export All"),
     ]
 
     # Column key to field name mapping
@@ -155,6 +160,79 @@ class RecordListScreen(Screen):
     def action_quit(self) -> None:
         """Quit the application."""
         self.app.exit()
+
+    def action_go_back(self) -> None:
+        """Go back to file list (directory mode) or quit."""
+        self.app.pop_screen()
+
+    def action_export_all(self) -> None:
+        """Export all records (processed) to the output directory."""
+        if not self._records:
+            self.notify("No records to export", severity="warning")
+            return
+
+        # Import here to avoid circular imports
+        from scripts.tui.app import ExportingScreen
+
+        # Push the exporting screen
+        exporting_screen = ExportingScreen(title="Exporting Records...")
+        self.app.push_screen(exporting_screen)
+
+        # Start the background export
+        self._run_export_all_records(exporting_screen)
+
+    @work(thread=True)
+    def _run_export_all_records(self, exporting_screen: "ExportingScreen") -> None:
+        """Run the export in a background thread."""
+        output_dir = getattr(self.app, "_output_dir", None)
+        if not output_dir:
+            output_dir = "parsed_datasets"
+
+        total_records = len(self._records)
+        processed_records = []
+
+        try:
+            # Process all records with progress updates
+            for i, record in enumerate(self._records):
+                self.app.call_from_thread(
+                    exporting_screen.update_progress,
+                    i,
+                    total_records,
+                    f"Record {i + 1}",
+                )
+                processed_records.append(process_record(record))
+
+            # Get filename from app
+            source_filename = getattr(self.app, "filename", "records")
+
+            # Final update before writing
+            self.app.call_from_thread(
+                exporting_screen.update_progress,
+                total_records,
+                total_records,
+                "Writing to file...",
+            )
+
+            output_path = export_records(
+                records=processed_records,
+                output_dir=output_dir,
+                source_filename=source_filename,
+                format="json",
+            )
+
+            message = f"Exported {len(processed_records)} records to {output_path}"
+            self.app.call_from_thread(exporting_screen.set_complete, message)
+
+        except Exception as e:
+            self.app.call_from_thread(
+                exporting_screen.set_complete,
+                f"Export failed: {e}",
+            )
+
+        # Pop the screen after a short delay to show completion
+        import time
+        time.sleep(1.5)
+        self.app.call_from_thread(self.app.pop_screen)
 
     def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
         """Handle row selection from the DataTable (Enter key press)."""

@@ -35,8 +35,32 @@ Records from different sources are normalized to a standard schema:
 ## Running Parser Finale
 
 ```bash
-uv run python -m scripts.parser_finale <file> [options]
+uv run python -m scripts.parser_finale <path> [options]
 ```
+
+The `path` argument can be either a single file or a directory.
+
+### Single File Mode
+
+When you pass a file, Parser Finale processes it according to the options:
+
+```bash
+uv run python -m scripts.parser_finale dataset/conversations.jsonl
+```
+
+### Directory Mode (TUI)
+
+When you pass a directory, Parser Finale launches an interactive TUI with a file picker:
+
+```bash
+# Open TUI with directory file picker
+uv run python -m scripts.parser_finale dataset/
+
+# Browse and select files interactively
+uv run python -m scripts.parser_finale /path/to/data/directory
+```
+
+In directory mode, you can browse files, select one to view its records, and navigate between the original and processed views. See the [TUI Guide](tui.md) for keybindings and navigation.
 
 ## Transformation Behavior
 
@@ -68,11 +92,26 @@ These fields are preserved in the output:
 | `--input-format FORMAT` | Input format: `auto`, `jsonl`, `json`, `parquet` (default: auto) |
 | `-f, --format, --output-format FORMAT` | Output format: `json`, `jsonl`, `parquet`, `markdown`, `text` (default: json) |
 | `-o, --output FILE` | Output file path (default: stdout, required for parquet output) |
+| `-O, --output-dir DIR` | Output directory for batch processing (default: parsed_datasets) |
 | `-i, --index N` | Process only record at index N |
 | `--start N` | Start index for range processing (default: 0) |
 | `--end N` | End index for range processing |
 | `--has-tools` | Only include records with tool definitions |
 | `--compact` | Compact JSON output (no indentation) |
+
+### Output Directory Mode
+
+When using `--output-dir` (or `-O`), the tool saves processed output to a file in the specified directory. The output filename follows the pattern: `{original_stem}_parsed.{format}`.
+
+```bash
+# Output to directory (creates train_parsed.json)
+uv run python -m scripts.parser_finale dataset/train.jsonl -O parsed_datasets/
+
+# Output as JSONL format (creates train_parsed.jsonl)
+uv run python -m scripts.parser_finale dataset/train.jsonl -f jsonl -O parsed_datasets/
+```
+
+If `-o` (specific output file) is provided, it takes precedence over `--output-dir`.
 
 ## Output Formats
 

@@ -23,10 +23,18 @@ Different formats may use different field names. The TUI normalizes all records 
 ## Running the TUI
 
 ```bash
-uv run python -m scripts.tui.app <file>
+uv run python -m scripts.tui.app <path> [options]
 ```
 
-Examples:
+The TUI accepts either a single file or a directory containing data files.
+
+### Options
+
+| Option | Description |
+|--------|-------------|
+| `-O, --output-dir` | Output directory for export operations (default: parsed_datasets) |
+
+### Single File Mode
 
 ```bash
 # JSONL file
@@ -39,6 +47,23 @@ uv run python -m scripts.tui.app dataset/train-00000-of-00001.parquet
 uv run python -m scripts.tui.app dataset/data.json
 ```
 
+### Directory Mode
+
+When you pass a directory, the TUI displays a file picker showing all supported data files:
+
+```bash
+# Open a directory of data files
+uv run python -m scripts.tui.app dataset/
+
+# The file picker shows all .jsonl, .json, .parquet, and .pq files
+uv run python -m scripts.tui.app /path/to/data/directory
+```
+
+In directory mode:
+- Select a file from the list to view its records
+- Press `ESC` or `b` from the Record List to return to the file picker
+- File sizes are displayed for easy identification
+
 ## Keybindings
 
 ### Global
@@ -47,12 +72,23 @@ uv run python -m scripts.tui.app dataset/data.json
 |-----|--------|
 | `q` | Quit application |
 
+### File List Screen (Directory Mode)
+
+| Key | Action |
+|-----|--------|
+| `↑/↓` | Navigate files |
+| `Enter` | Open selected file |
+| `P` | Export all files (processed) to output directory |
+| `ESC` | Quit application |
+
 ### Record List Screen
 
 | Key | Action |
 |-----|--------|
 | `↑/↓` | Navigate records |
 | `Enter` | Open comparison view |
+| `ESC` / `b` | Back to file list (directory mode) or quit |
+| `X` | Export all records (processed) to output directory |
 
 ### Comparison Screen
 
@@ -67,6 +103,7 @@ uv run python -m scripts.tui.app dataset/data.json
 | `m` | Show field detail modal |
 | `e` | Expand all nodes |
 | `c` | Collapse all nodes |
+| `x` | Export current record (processed) to output directory |
 | `↑/↓` | Navigate tree nodes |
 | `Enter` | Expand/collapse node |
 
@@ -78,6 +115,22 @@ uv run python -m scripts.tui.app dataset/data.json
 | `q` | Quit application |
 
 ## Screens
+
+### File List Screen (Directory Mode)
+
+When you open a directory, the File List Screen displays all supported data files:
+
+| Column | Description |
+|--------|-------------|
+| FILE NAME | Name of the data file |
+| FORMAT | File format (JSONL, JSON, PARQUET) |
+| SIZE | File size (B, KB, MB, GB) |
+
+**Navigation:**
+
+- Use arrow keys to move between files
+- Press `Enter` to open the selected file
+- Press `ESC` or `q` to quit
 
 ### Record List Screen
 
@@ -104,14 +157,16 @@ The main screen displays all records in a table format:
 
 When you select a record, you see a side-by-side comparison:
 
-- **Left panel**: Original record
-- **Right panel**: Processed record (parser finale output)
+- **Left panel**: Original Record (blue header)
+- **Right panel**: Parsed Output (green header)
 
 Features:
 
-- Synchronized scrolling between panels
-- Diff highlighting shows changes
-- Hierarchical JSON tree view
+- **Synchronized scrolling**: Both panels scroll together (toggle with `s`)
+- **Synchronized expansion**: Expanding/collapsing nodes mirrors to other panel
+- **Diff highlighting**: Shows changes between original and processed (toggle with `d`)
+- **Hierarchical JSON tree**: Collapsible tree view of nested data
+- **Field detail modal**: View full untruncated content (press `m`)
 
 ### Field Detail Modal
 
@@ -130,9 +185,16 @@ Press `m` on any cell to see detailed information:
 
 ## Workflow
 
+### Browsing a Directory
+
+1. Launch the TUI with a directory path
+2. Use arrow keys to navigate the file list
+3. Press `Enter` to open a file
+4. Press `ESC` or `b` from the record list to return to the file picker
+
 ### Browsing Records
 
-1. Launch the TUI with your dataset file
+1. Launch the TUI with your dataset file (or select from directory)
 2. Use arrow keys to navigate the record list
 3. Press `m` to preview fields without leaving the list
 4. Press `Enter` to view full record details
@@ -150,6 +212,48 @@ Press `m` on any cell to see detailed information:
 2. Press `m` on the TOOLS cell
 3. Scroll through the tool names and descriptions
 4. Press `ESC` to close the modal
+
+### Exporting Data
+
+The TUI can export processed records to files. Exports go to the output directory specified by `--output-dir` (default: `parsed_datasets/`).
+
+**Export all records (batch):**
+
+1. From the Record List screen, press `X` (Shift+x)
+2. All records will be processed and exported
+3. Output file: `{output_dir}/{source_filename}_parsed.json`
+
+**Export single record:**
+
+1. From the Comparison Screen, press `x`
+2. The current processed record will be exported
+3. Output file: `{output_dir}/{source_filename}_record_{index}_parsed.json`
+
+**Export all files in directory:**
+
+1. From the File List screen (directory mode), press `P` (Shift+p)
+2. All files in the directory will be processed and exported
+3. Each file creates: `{output_dir}/{filename}_parsed.json`
+
+**Export Progress Screen:**
+
+When exporting, a progress screen appears showing:
+- Current file/record being processed
+- Progress count (e.g., "3 / 10 completed")
+- Completion message with output path
+- Auto-dismisses after export completes
+
+**Example:**
+
+```bash
+# Export all files in a directory
+uv run python -m scripts.tui.app dataset/ -O my_exports/
+# Then press P to export all files to my_exports/
+
+# Export single file's records
+uv run python -m scripts.tui.app dataset/train.jsonl -O my_exports/
+# Then press X to export all records to my_exports/train_parsed.json
+```
 
 ## Tips
 
@@ -173,6 +277,26 @@ For files over 100MB, the TUI shows a loading screen with progress:
 
 - **JSONL/JSON**: Streams records one at a time to minimize memory usage
 - **Parquet**: Uses PyArrow's efficient columnar access and metadata for record counts
+
+### Caching
+
+Records are cached after the first load to improve navigation performance:
+
+- Moving between Record List and Comparison Screen doesn't reload the file
+- Cache is per-file and session-scoped
+- Large files benefit significantly from caching
+
+### Memory Safety
+
+The TUI includes multiple safeguards to prevent crashes on deeply nested or large data:
+
+| Limit | Value | Purpose |
+|-------|-------|---------|
+| Tree display depth | 100 | Prevents stack overflow in recursive rendering |
+| Diff calculation depth | 100 | Prevents stack overflow in comparison |
+| Expand/collapse depth | 50 | Limits recursive operations |
+| String processing | 10,000 chars | Prevents memory issues with huge strings |
+| Display truncation | 50 chars | Keeps UI responsive |
 
 ### Format-Specific Notes
 

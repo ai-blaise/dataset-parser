@@ -28,7 +28,9 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
+from pathlib import Path
 from typing import Any, Iterator
 
 import pyarrow as pa
@@ -253,7 +255,7 @@ def main() -> None:
         description="Parse datasets and output content with emptied assistant responses. "
         "Supports JSONL, JSON, and Parquet input/output formats."
     )
-    parser.add_argument("filename", help="Path to data file (JSONL, JSON, or Parquet)")
+    parser.add_argument("path", help="Path to data file or directory of data files (JSONL, JSON, or Parquet)")
     parser.add_argument(
         "--input-format",
         choices=["auto", "jsonl", "json", "parquet"],
@@ -270,6 +272,11 @@ def main() -> None:
     parser.add_argument(
         "-o", "--output",
         help="Output file (default: stdout)"
+    )
+    parser.add_argument(
+        "-O", "--output-dir",
+        default="parsed_datasets",
+        help="Output directory for batch processing (default: parsed_datasets)"
     )
     parser.add_argument(
         "-i", "--index",
@@ -300,22 +307,45 @@ def main() -> None:
 
     args = parser.parse_args()
 
-    # Verify file exists
-    import os
-    if not os.path.exists(args.filename):
-        print(f"Error: File not found: {args.filename}", file=sys.stderr)
+    # Verify path exists
+    if not os.path.exists(args.path):
+        print(f"Error: Path not found: {args.path}", file=sys.stderr)
         sys.exit(1)
 
+    # Determine if path is file or directory
+    if os.path.isdir(args.path):
+        # Directory mode - launch TUI with file picker
+        from scripts.tui.app import JsonComparisonApp
+        app = JsonComparisonApp(
+            path=args.path,
+            input_format=args.input_format,
+            is_directory=True,
+            output_dir=args.output_dir,
+        )
+        app.run()
+        return
+
+    # Single file mode - existing processing behavior
+    # Determine output path: -o takes precedence, otherwise use --output-dir
+    effective_output = args.output
+    if not args.output and args.output_dir:
+        # Create output directory if it doesn't exist
+        os.makedirs(args.output_dir, exist_ok=True)
+        # Construct output path from output_dir + original filename + _parsed + format
+        source_path = Path(args.path)
+        output_filename = f"{source_path.stem}_parsed.{args.output_format}"
+        effective_output = str(Path(args.output_dir) / output_filename)
+
     # Parquet output requires an output file
-    if args.output_format == "parquet" and not args.output:
-        print("Error: Parquet output requires -o/--output file", file=sys.stderr)
+    if args.output_format == "parquet" and not effective_output:
+        print("Error: Parquet output requires -o/--output file or --output-dir", file=sys.stderr)
         sys.exit(1)
 
     # Determine output destination (not used for parquet)
     output_file = None
     output = sys.stdout
-    if args.output and args.output_format != "parquet":
-        output_file = open(args.output, 'w', encoding='utf-8')
+    if effective_output and args.output_format != "parquet":
+        output_file = open(effective_output, 'w', encoding='utf-8')
         output = output_file
 
     try:
@@ -330,7 +360,7 @@ def main() -> None:
         results: list[dict[str, Any]] = []
 
         # Use format-aware loading
-        for idx, record in enumerate(load_records(args.filename, args.input_format)):
+        for idx, record in enumerate(load_records(args.path, args.input_format)):
             # Apply index filter
             if args.index is not None and idx != args.index:
                 continue
@@ -357,8 +387,8 @@ def main() -> None:
         # Output non-streaming formats
         if args.output_format == "parquet":
             # Write to parquet file
-            write_parquet(results, args.output)
-            print(f"Wrote {len(results)} records to {args.output}", file=sys.stderr)
+            write_parquet(results, effective_output)
+            print(f"Wrote {len(results)} records to {effective_output}", file=sys.stderr)
 
         elif args.output_format == "json" and results:
             if len(results) == 1:

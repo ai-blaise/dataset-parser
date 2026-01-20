@@ -19,6 +19,11 @@ Usage:
 """
 
 from scripts.data_formats.base import DataLoader
+from scripts.data_formats.directory_loader import (
+    SUPPORTED_EXTENSIONS,
+    discover_data_files,
+    format_file_size,
+)
 from scripts.data_formats.format_detector import (
     EXTENSION_MAP,
     SUPPORTED_FORMATS,
@@ -46,6 +51,10 @@ __all__ = [
     "get_loader_for_format",
     "EXTENSION_MAP",
     "SUPPORTED_FORMATS",
+    # Directory utilities
+    "SUPPORTED_EXTENSIONS",
+    "discover_data_files",
+    "format_file_size",
     # Schema normalization
     "normalize_record",
     "denormalize_record",

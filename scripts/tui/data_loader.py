@@ -25,6 +25,8 @@ normalizes this automatically.
 from __future__ import annotations
 
 import json
+import os
+from pathlib import Path
 from typing import Any, Callable, Iterator
 
 from scripts.data_formats import get_loader, normalize_record
@@ -373,3 +375,54 @@ def get_record_diff(original: dict[str, Any], processed: dict[str, Any]) -> dict
     """
     # Stub implementation - will be fully implemented in diff_indicator.py
     return {}
+
+
+def export_records(
+    records: list[dict[str, Any]],
+    output_dir: str,
+    source_filename: str,
+    format: str = "json",
+) -> str:
+    """
+    Export processed records to an output directory.
+
+    Creates the output directory if it doesn't exist and writes records
+    to a file named {original_stem}_parsed.{format}.
+
+    Args:
+        records: List of record dictionaries to export.
+        output_dir: Directory path for output files.
+        source_filename: Original source filename (used for output naming).
+        format: Output format ('json' or 'jsonl'). Defaults to 'json'.
+
+    Returns:
+        The path to the created output file.
+
+    Raises:
+        ValueError: If format is not supported.
+        OSError: If the output directory cannot be created or file cannot be written.
+
+    Examples:
+        >>> path = export_records(records, "parsed_datasets", "train.jsonl")
+        >>> print(f"Exported to {path}")  # "parsed_datasets/train_parsed.json"
+    """
+    if format not in ("json", "jsonl"):
+        raise ValueError(f"Unsupported export format: {format}. Use 'json' or 'jsonl'.")
+
+    # Create output directory if it doesn't exist
+    os.makedirs(output_dir, exist_ok=True)
+
+    # Construct output filename
+    source_path = Path(source_filename)
+    output_filename = f"{source_path.stem}_parsed.{format}"
+    output_path = Path(output_dir) / output_filename
+
+    # Write records to file
+    with open(output_path, "w", encoding="utf-8") as f:
+        if format == "json":
+            json.dump(records, f, indent=2, ensure_ascii=False)
+        else:  # jsonl
+            for record in records:
+                f.write(json.dumps(record, ensure_ascii=False) + "\n")
+
+    return str(output_path)

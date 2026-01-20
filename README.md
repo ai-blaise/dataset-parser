@@ -7,6 +7,8 @@ A toolkit for exploring and transforming JSONL datasets containing AI conversati
 - **CLI Tool** - List, search, and analyze records from the command line
 - **Parser Finale** - Transform datasets by removing assistant responses
 - **TUI Application** - Interactive terminal interface for browsing datasets
+- **Data Splitter** - Split large JSONL datasets into N equal parts for parallel processing
+- **Multi-Format Support** - Load data from JSONL, JSON, and Parquet formats with automatic detection
 
 ## Requirements
 
@@ -36,7 +38,11 @@ pip install -e .
 ### Browse a dataset interactively
 
 ```bash
+# Open a single file
 uv run python -m scripts.tui.app dataset/conversations.jsonl
+
+# Open a directory (shows file picker)
+uv run python -m scripts.tui.app dataset/
 ```
 
 ### List records
@@ -57,16 +63,27 @@ uv run python scripts/main.py show dataset/conversations.jsonl 0
 uv run python scripts/main.py search dataset/conversations.jsonl "query" -c
 ```
 
-### Get dataset statistics
-
-```bash
-uv run python scripts/main.py stats dataset/conversations.jsonl -v
-```
-
 ### Extract prompts (remove assistant responses)
 
 ```bash
+# Output to stdout
+uv run python -m scripts.parser_finale dataset/conversations.jsonl
+
+# Output to a specific file
 uv run python -m scripts.parser_finale dataset/conversations.jsonl -o prompts.json
+
+# Output to a directory (creates train_parsed.json)
+uv run python -m scripts.parser_finale dataset/train.jsonl -O parsed_datasets/
+```
+
+### Split a dataset into parts
+
+```bash
+# Split into 4 parts
+python scripts/data_splitter.py dataset/conversations.jsonl -n 4
+
+# Preview split without creating files
+python scripts/data_splitter.py dataset/conversations.jsonl -n 10 --dry-run
 ```
 
 ## Usage
@@ -84,10 +101,15 @@ uv run python -m scripts.parser_finale dataset/conversations.jsonl -o prompts.js
 
 | Key | Action |
 |-----|--------|
-| `Enter` | View full record details |
-| `f` | Show field detail modal |
+| `Enter` | Select file / View record details |
+| `ESC` / `b` | Go back / Close modal |
+| `m` | Show field detail modal |
+| `P` | Export all files in directory (File List) |
+| `X` | Export all records in file (Record List) |
+| `x` | Export current record (Comparison) |
+| `s` | Toggle synchronized scrolling |
+| `d` | Toggle diff highlighting |
 | `q` | Quit |
-| `ESC` | Close modal / Go back |
 | Arrow keys | Navigate |
 
 ### Parser Finale Formats
@@ -96,6 +118,7 @@ uv run python -m scripts.parser_finale dataset/conversations.jsonl -o prompts.js
 |--------|-------------|
 | `json` | Pretty-printed JSON (default) |
 | `jsonl` | One record per line |
+| `parquet` | Apache Parquet columnar format |
 | `markdown` | Human-readable format |
 | `text` | Plain text summary |
 
@@ -108,6 +131,8 @@ For detailed documentation, see the [docs](docs/) directory:
 - [CLI Reference](docs/cli.md) - Complete CLI command documentation
 - [TUI Guide](docs/tui.md) - Interactive terminal UI guide
 - [Parser Finale](docs/parser-finale.md) - Transformation tool documentation
+- [Data Splitter](docs/data-splitter.md) - Dataset splitting utility
+- [Data Formats](docs/data-formats.md) - Multi-format loading and schema normalization
 
 ## Development
 
@@ -121,13 +146,26 @@ uv run pytest tests/
 
 ```
 data-gen/
-├── scripts/           # Main application code
-│   ├── main.py        # CLI tool
+├── scripts/              # Main application code
+│   ├── main.py           # CLI tool
 │   ├── parser_finale.py  # Transformation engine
-│   └── tui/           # Terminal UI
-├── tests/             # Test suite
-├── docs/              # Documentation
-└── dataset/           # Data files (gitignored)
+│   ├── data_splitter.py  # Dataset splitting utility
+│   ├── data_formats/     # Multi-format data loaders
+│   │   ├── base.py       # Abstract base loader class
+│   │   ├── jsonl_loader.py
+│   │   ├── json_loader.py
+│   │   ├── parquet_loader.py
+│   │   ├── format_detector.py
+│   │   ├── schema_normalizer.py
+│   │   └── directory_loader.py
+│   └── tui/              # Terminal UI
+│       ├── app.py        # Main application
+│       ├── data_loader.py
+│       ├── views/        # Screen components
+│       └── widgets/      # Reusable UI widgets
+├── tests/                # Test suite
+├── docs/                 # Documentation
+└── dataset/              # Data files (gitignored)
 ```
 
 ## License
