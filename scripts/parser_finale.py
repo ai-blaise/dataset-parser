@@ -1,13 +1,26 @@
 """
-Parser Finale - Output JSONL content with emptied assistant responses.
+Parser Finale - Output dataset content with emptied assistant responses.
 
-This parser processes JSONL records, emptying assistant message content while
-preserving the conversation structure, tool_calls, system prompts, user messages,
-tools, and metadata.
+This parser processes dataset records (JSONL, JSON, or Parquet), emptying
+assistant message content while preserving the conversation structure,
+tool_calls, system prompts, user messages, tools, and metadata.
+
+Supported Input Formats:
+    - JSONL (.jsonl): One JSON object per line
+    - JSON (.json): Array of JSON objects
+    - Parquet (.parquet, .pq): Apache Parquet columnar format
+
+Supported Output Formats:
+    - jsonl: One JSON object per line
+    - json: JSON array
+    - parquet: Apache Parquet format
+    - markdown: Human-readable Markdown
+    - text: Plain text summary
 
 Usage:
     uv run python -m scripts.parser_finale dataset/interactive_agent.jsonl
-    uv run python -m scripts.parser_finale dataset/interactive_agent.jsonl --format markdown
+    uv run python -m scripts.parser_finale dataset/data.parquet --output-format jsonl
+    uv run python -m scripts.parser_finale dataset/interactive_agent.jsonl -f markdown
     uv run python -m scripts.parser_finale dataset/interactive_agent.jsonl -i 5 -o output.json
 """
 
@@ -17,6 +30,11 @@ import argparse
 import json
 import sys
 from typing import Any, Iterator
+
+import pyarrow as pa
+import pyarrow.parquet as pq
+
+from scripts.data_formats import get_loader, get_loader_for_format, normalize_record
 
 
 def process_messages(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -156,7 +174,11 @@ def format_text(record: dict[str, Any]) -> str:
 
 
 def load_jsonl(filename: str) -> Iterator[dict[str, Any]]:
-    """Lazily load records from JSONL file."""
+    """Lazily load records from JSONL file.
+
+    Note: This function is kept for backward compatibility.
+    For multi-format support, use load_records() instead.
+    """
     with open(filename, 'r', encoding='utf-8') as f:
         for line in f:
             line = line.strip()
@@ -164,15 +186,84 @@ def load_jsonl(filename: str) -> Iterator[dict[str, Any]]:
                 yield json.loads(line)
 
 
+def load_records(
+    filename: str,
+    input_format: str = "auto",
+    normalize: bool = True,
+) -> Iterator[dict[str, Any]]:
+    """Load records from any supported file format.
+
+    Args:
+        filename: Path to the data file.
+        input_format: Format hint ('auto', 'jsonl', 'json', 'parquet').
+        normalize: Whether to normalize records to standard schema.
+
+    Yields:
+        Each record as a dictionary.
+    """
+    if input_format == "auto":
+        loader = get_loader(filename)
+    else:
+        loader = get_loader_for_format(input_format)
+
+    for record in loader.load(filename):
+        if normalize:
+            yield normalize_record(record, loader.format_name)
+        else:
+            yield record
+
+
+def write_parquet(records: list[dict[str, Any]], output_file: str) -> None:
+    """Write processed records to Parquet format.
+
+    Args:
+        records: List of processed records.
+        output_file: Path to output file.
+    """
+    if not records:
+        # Create empty parquet file with minimal schema
+        table = pa.table({"_empty": []})
+        pq.write_table(table, output_file)
+        return
+
+    table = pa.Table.from_pylist(records)
+    pq.write_table(table, output_file)
+
+
+def write_json_array(
+    records: list[dict[str, Any]],
+    output_file: str,
+    pretty: bool = True,
+) -> None:
+    """Write processed records to JSON array format.
+
+    Args:
+        records: List of processed records.
+        output_file: Path to output file.
+        pretty: Whether to use pretty printing with indentation.
+    """
+    indent = 2 if pretty else None
+    with open(output_file, 'w', encoding='utf-8') as f:
+        json.dump(records, f, indent=indent, ensure_ascii=False)
+
+
 def main() -> None:
     """Main entry point for parser_finale."""
     parser = argparse.ArgumentParser(
-        description="Parse JSONL datasets and output content with emptied assistant responses"
+        description="Parse datasets and output content with emptied assistant responses. "
+        "Supports JSONL, JSON, and Parquet input/output formats."
     )
-    parser.add_argument("filename", help="Path to JSONL file")
+    parser.add_argument("filename", help="Path to data file (JSONL, JSON, or Parquet)")
     parser.add_argument(
-        "-f", "--format",
-        choices=["json", "jsonl", "markdown", "text"],
+        "--input-format",
+        choices=["auto", "jsonl", "json", "parquet"],
+        default="auto",
+        help="Input file format (default: auto-detect from extension)"
+    )
+    parser.add_argument(
+        "-f", "--format", "--output-format",
+        dest="output_format",
+        choices=["json", "jsonl", "parquet", "markdown", "text"],
         default="json",
         help="Output format (default: json)"
     )
@@ -210,35 +301,36 @@ def main() -> None:
     args = parser.parse_args()
 
     # Verify file exists
-    try:
-        with open(args.filename, 'r') as f:
-            pass
-    except FileNotFoundError:
+    import os
+    if not os.path.exists(args.filename):
         print(f"Error: File not found: {args.filename}", file=sys.stderr)
         sys.exit(1)
-    except PermissionError:
-        print(f"Error: Permission denied: {args.filename}", file=sys.stderr)
+
+    # Parquet output requires an output file
+    if args.output_format == "parquet" and not args.output:
+        print("Error: Parquet output requires -o/--output file", file=sys.stderr)
         sys.exit(1)
 
-    # Determine output destination
+    # Determine output destination (not used for parquet)
     output_file = None
     output = sys.stdout
-    if args.output:
+    if args.output and args.output_format != "parquet":
         output_file = open(args.output, 'w', encoding='utf-8')
         output = output_file
 
     try:
-        # Select formatter
+        # Select formatter (for text-based formats)
         formatters = {
             "json": lambda r: format_json(r, not args.compact),
             "jsonl": format_jsonl,
             "markdown": format_markdown,
             "text": format_text,
         }
-        formatter = formatters[args.format]
 
         results: list[dict[str, Any]] = []
-        for idx, record in enumerate(load_jsonl(args.filename)):
+
+        # Use format-aware loading
+        for idx, record in enumerate(load_records(args.filename, args.input_format)):
             # Apply index filter
             if args.index is not None and idx != args.index:
                 continue
@@ -255,24 +347,33 @@ def main() -> None:
 
             processed = process_record(record)
 
-            if args.format == "jsonl":
+            # Stream JSONL output directly
+            if args.output_format == "jsonl":
+                formatter = formatters["jsonl"]
                 print(formatter(processed), file=output)
             else:
                 results.append(processed)
 
-        # Output non-JSONL formats
-        if args.format != "jsonl" and results:
-            if args.format == "json":
-                if len(results) == 1:
-                    print(formatter(results[0]), file=output)
-                else:
-                    indent = 2 if not args.compact else None
-                    print(json.dumps(results, indent=indent, ensure_ascii=False), file=output)
+        # Output non-streaming formats
+        if args.output_format == "parquet":
+            # Write to parquet file
+            write_parquet(results, args.output)
+            print(f"Wrote {len(results)} records to {args.output}", file=sys.stderr)
+
+        elif args.output_format == "json" and results:
+            if len(results) == 1:
+                formatter = formatters["json"]
+                print(formatter(results[0]), file=output)
             else:
-                for i, result in enumerate(results):
-                    print(formatter(result), file=output)
-                    if i < len(results) - 1:
-                        print("\n" + "=" * 60 + "\n", file=output)
+                indent = 2 if not args.compact else None
+                print(json.dumps(results, indent=indent, ensure_ascii=False), file=output)
+
+        elif args.output_format in ("markdown", "text") and results:
+            formatter = formatters[args.output_format]
+            for i, result in enumerate(results):
+                print(formatter(result), file=output)
+                if i < len(results) - 1:
+                    print("\n" + "=" * 60 + "\n", file=output)
 
     finally:
         if output_file:

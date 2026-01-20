@@ -9,6 +9,7 @@ data-gen is a modular toolkit for exploring and transforming JSONL datasets cont
 1. **CLI Tool** - Command-line interface for dataset exploration
 2. **Parser Finale** - Core transformation engine for processing records
 3. **TUI Application** - Interactive terminal UI for browsing datasets
+4. **Data Splitter** - Utility for splitting JSONL files into N parts
 
 ## Directory Structure
 
@@ -24,6 +25,7 @@ data-gen/
 ├── scripts/                   # Main application code
 │   ├── main.py                # CLI tool implementation
 │   ├── parser_finale.py       # Core JSONL processor
+│   ├── data_splitter.py       # Dataset splitting utility
 │   └── tui/                   # Terminal UI application
 │       ├── __init__.py
 │       ├── app.py             # Main Textual app
@@ -54,10 +56,10 @@ data-gen/
 │                  data-gen Application                   │
 ├─────────────────────────────────────────────────────────┤
 │                                                         │
-│  ┌─────────────────┬─────────────────────┬───────────┐  │
-│  │   CLI Tool      │  Parser Finale      │   TUI     │  │
-│  │  (main.py)      │  (parser_finale.py) │  (app.py) │  │
-│  └────────┬────────┴──────────┬──────────┴─────┬─────┘  │
+│  ┌───────────────┬─────────────────┬───────────┬───────────────┐  │
+│  │   CLI Tool    │  Parser Finale  │   TUI     │ Data Splitter │  │
+│  │  (main.py)    │(parser_finale)  │  (app.py) │(data_splitter)│  │
+│  └───────┬───────┴────────┬────────┴─────┬─────┴───────────────┘  │
 │           │                   │                │        │
 │           └───────────────────┼────────────────┘        │
 │                               │                         │
@@ -123,6 +125,18 @@ An interactive terminal interface built with the [Textual](https://textual.textu
 - **Field Detail Modal**: Detailed view of individual fields
 
 See [TUI Documentation](tui.md) for detailed usage.
+
+### Data Splitter (`scripts/data_splitter.py`)
+
+A standalone utility for splitting JSONL files into N equal (or near-equal) parts. Key features:
+
+- Handles both even and odd record counts
+- Streaming implementation for memory efficiency
+- Supports dry-run mode for previewing splits
+- Includes verification to confirm recombination matches original
+- Preserves exact line formatting
+
+See [Data Splitter Documentation](data-splitter.md) for detailed usage.
 
 ### Data Loader (`scripts/tui/data_loader.py`)
 

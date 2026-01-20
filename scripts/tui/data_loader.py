@@ -1,23 +1,33 @@
 """
-Data loader utilities for JSONL files containing AI conversation data.
+Data loader utilities for AI conversation datasets.
 
-This module provides functions for loading and processing JSONL files that contain
-AI conversation records with messages, tools, and metadata.
+This module provides functions for loading and processing data files in various
+formats (JSONL, JSON, Parquet) that contain AI conversation records with
+messages, tools, and metadata.
 
-Record Structure:
+Supported Formats:
+    - JSONL (.jsonl): One JSON object per line
+    - JSON (.json): Array of JSON objects or single object
+    - Parquet (.parquet, .pq): Apache Parquet columnar format
+
+Record Structure (after normalization):
     - uuid: Unique identifier string
     - messages: List of message dicts with role, content, tool_calls, reasoning_content
     - tools: List of tool definitions with function.name, function.description, function.parameters
     - license: License string (e.g., "cc-by-4.0")
     - used_in: List of strings indicating usage (e.g., ["nano_v3"])
     - reasoning: Optional string (e.g., "on")
+
+Note: Parquet files may use 'conversations' instead of 'messages' - the loader
+normalizes this automatically.
 """
 
 from __future__ import annotations
 
 import json
-from typing import Any, Iterator, Callable
+from typing import Any, Callable, Iterator
 
+from scripts.data_formats import get_loader, normalize_record
 from scripts.parser_finale import process_record
 
 
@@ -92,6 +102,8 @@ def load_jsonl(filename: str) -> Iterator[dict[str, Any]]:
     This generator yields one record at a time, making it memory-efficient
     for processing large files.
 
+    Note: For multi-format support, consider using load_records() instead.
+
     Args:
         filename: Path to the JSONL file.
 
@@ -113,34 +125,68 @@ def load_jsonl(filename: str) -> Iterator[dict[str, Any]]:
                 yield json.loads(line)
 
 
+def load_records(filename: str, normalize: bool = True) -> Iterator[dict[str, Any]]:
+    """
+    Lazily load records from any supported file format.
+
+    This generator yields one record at a time, making it memory-efficient
+    for processing large files. Supports JSONL, JSON, and Parquet formats.
+
+    Args:
+        filename: Path to the data file (format detected from extension).
+        normalize: Whether to normalize records to standard schema (default True).
+                  This converts 'conversations' to 'messages' for Parquet files.
+
+    Yields:
+        Each record as a dictionary (normalized if normalize=True).
+
+    Raises:
+        FileNotFoundError: If the file does not exist.
+        ValueError: If the file format is not supported.
+
+    Examples:
+        >>> for record in load_records("data.parquet"):
+        ...     print(record["messages"])  # Works even if source has 'conversations'
+    """
+    loader = get_loader(filename)
+    for record in loader.load(filename):
+        if normalize:
+            yield normalize_record(record, loader.format_name)
+        else:
+            yield record
+
+
 def load_all_records(
     filename: str,
     use_cache: bool = True,
     progress_callback: Callable[[int, int | None], None] | None = None,
     max_records: int | None = None,
+    normalize: bool = True,
 ) -> list[dict[str, Any]]:
     """
-    Load all records from a JSONL file into memory.
+    Load all records from a data file into memory.
 
     This function reads the entire file and returns a list of all records.
-    Use load_jsonl() for memory-efficient processing of large files.
+    Supports JSONL, JSON, and Parquet formats.
+    Use load_records() for memory-efficient processing of large files.
 
     Args:
-        filename: Path to the JSONL file.
+        filename: Path to the data file (format detected from extension).
         use_cache: Whether to use cached records if available (default True).
         progress_callback: Optional callback(loaded_count, total_count) for progress updates.
                           total_count may be None if unknown.
         max_records: Maximum number of records to load (None = all).
+        normalize: Whether to normalize records to standard schema (default True).
 
     Returns:
-        A list of all records as dictionaries.
+        A list of all records as dictionaries (normalized if normalize=True).
 
     Raises:
         FileNotFoundError: If the file does not exist.
-        json.JSONDecodeError: If a line contains invalid JSON.
+        ValueError: If the file format is not supported.
 
     Examples:
-        >>> records = load_all_records("data.jsonl")
+        >>> records = load_all_records("data.parquet")
         >>> print(f"Loaded {len(records)} records")
     """
     # Check cache first
@@ -151,9 +197,9 @@ def load_all_records(
                 return cached[:max_records]
             return cached
 
-    # Load records with optional progress reporting
+    # Load records with optional progress reporting using format-aware loader
     records: list[dict[str, Any]] = []
-    for i, record in enumerate(load_jsonl(filename)):
+    for i, record in enumerate(load_records(filename, normalize=normalize)):
         if max_records is not None and i >= max_records:
             break
         records.append(record)
@@ -170,18 +216,22 @@ def load_all_records(
     return records
 
 
-def load_record_at_index(filename: str, index: int) -> dict[str, Any]:
+def load_record_at_index(
+    filename: str, index: int, normalize: bool = True
+) -> dict[str, Any]:
     """
     Load a single record at a specific index efficiently.
 
     Uses cached records if available, otherwise reads from file.
+    Supports JSONL, JSON, and Parquet formats.
 
     Args:
-        filename: Path to the JSONL file.
+        filename: Path to the data file (format detected from extension).
         index: The index of the record to load.
+        normalize: Whether to normalize the record to standard schema (default True).
 
     Returns:
-        The record at the given index.
+        The record at the given index (normalized if normalize=True).
 
     Raises:
         FileNotFoundError: If the file does not exist.
@@ -194,8 +244,8 @@ def load_record_at_index(filename: str, index: int) -> dict[str, Any]:
             raise IndexError(f"Record index {index} out of range (0-{len(cached) - 1})")
         return cached[index]
 
-    # Fall back to streaming read (more memory efficient for single record)
-    for i, record in enumerate(load_jsonl(filename)):
+    # Fall back to streaming read using format-aware loader
+    for i, record in enumerate(load_records(filename, normalize=normalize)):
         if i == index:
             return record
 

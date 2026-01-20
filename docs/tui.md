@@ -1,6 +1,24 @@
 # TUI Application Guide
 
-The TUI (Terminal User Interface) provides an interactive way to browse and analyze JSONL datasets.
+The TUI (Terminal User Interface) provides an interactive way to browse and analyze datasets containing AI conversation data. It supports multiple file formats including JSONL, JSON, and Parquet.
+
+## Supported File Formats
+
+| Format | Extensions | Description |
+|--------|------------|-------------|
+| JSONL | `.jsonl` | One JSON object per line (streaming) |
+| JSON | `.json` | JSON array of objects |
+| Parquet | `.parquet`, `.pq` | Apache Parquet columnar format |
+
+The TUI automatically detects the file format from the extension. The title bar displays the detected format (e.g., "Dataset Viewer - data.parquet (parquet)").
+
+### Schema Normalization
+
+Different formats may use different field names. The TUI normalizes all records to a standard schema:
+
+- Parquet files using `conversations` are converted to `messages`
+- Parquet `trial_name` is used as `uuid` fallback
+- Missing standard fields are assigned defaults
 
 ## Running the TUI
 
@@ -8,10 +26,17 @@ The TUI (Terminal User Interface) provides an interactive way to browse and anal
 uv run python -m scripts.tui.app <file>
 ```
 
-Example:
+Examples:
 
 ```bash
+# JSONL file
 uv run python -m scripts.tui.app dataset/conversations.jsonl
+
+# Parquet file
+uv run python -m scripts.tui.app dataset/train-00000-of-00001.parquet
+
+# JSON file
+uv run python -m scripts.tui.app dataset/data.json
 ```
 
 ## Keybindings
@@ -143,6 +168,26 @@ Use the PREVIEW column to see the first user message at a glance without opening
 ### Large Datasets
 
 The TUI loads records efficiently, so large datasets are supported. Use the MSGS column to identify conversation length before diving in.
+
+For files over 100MB, the TUI shows a loading screen with progress:
+
+- **JSONL/JSON**: Streams records one at a time to minimize memory usage
+- **Parquet**: Uses PyArrow's efficient columnar access and metadata for record counts
+
+### Format-Specific Notes
+
+**Parquet files:**
+- Record count is retrieved from file metadata (instant)
+- Random access is efficient via row group seeking
+- Nested structures (like conversations) are fully supported
+
+**JSONL files:**
+- Best for streaming large files
+- Each line is parsed independently
+
+**JSON files:**
+- Entire file must be parsed at once
+- Best for smaller datasets or exports
 
 ## Visual Elements
 

@@ -1,8 +1,13 @@
 """
-Main Textual application for the JSON Comparison Viewer.
+Main Textual application for the Dataset Viewer.
 
-This is the entry point for the TUI that compares original JSONL records
+This is the entry point for the TUI that compares original dataset records
 with parser_finale processed output side-by-side.
+
+Supported Formats:
+    - JSONL (.jsonl): One JSON object per line
+    - JSON (.json): Array of JSON objects
+    - Parquet (.parquet, .pq): Apache Parquet columnar format
 """
 
 import argparse
@@ -16,9 +21,10 @@ from textual.widgets import Static, ProgressBar, Footer, Header
 from textual.containers import Center, Middle
 from textual import work
 
+from scripts.data_formats import detect_format
 from scripts.tui.views.record_list import RecordListScreen
 from scripts.tui.views.comparison_screen import ComparisonScreen
-from scripts.tui.data_loader import load_all_records, load_jsonl, set_cached_records
+from scripts.tui.data_loader import load_all_records, load_records, set_cached_records
 
 
 # Maximum file size (in bytes) for synchronous loading (100 MB)
@@ -72,9 +78,9 @@ class LoadingScreen(Screen):
 
 
 class JsonComparisonApp(App):
-    """A Textual app for comparing original and processed JSONL records."""
+    """A Textual app for comparing original and processed dataset records."""
 
-    TITLE = "JSON Comparison Viewer"
+    TITLE = "Dataset Viewer"
 
     CSS = """
     Screen {
@@ -185,18 +191,29 @@ class JsonComparisonApp(App):
     ]
 
     def __init__(self, filename: str):
-        """Initialize the app with a JSONL file.
+        """Initialize the app with a data file.
 
         Args:
-            filename: Path to the JSONL file to load.
+            filename: Path to the data file (JSONL, JSON, or Parquet).
         """
         super().__init__()
         self.filename = filename
         self.records: list[dict] = []
         self._loading = False
+        self._file_format: str = "unknown"
 
     def on_mount(self) -> None:
         """Load data and push the record list screen."""
+        # Detect file format and update title
+        try:
+            self._file_format = detect_format(self.filename)
+        except ValueError:
+            self._file_format = "unknown"
+
+        # Update title to show format
+        basename = os.path.basename(self.filename)
+        self.title = f"Dataset Viewer - {basename} ({self._file_format})"
+
         # Check file size to decide loading strategy
         try:
             file_size = os.path.getsize(self.filename)
@@ -222,7 +239,8 @@ class JsonComparisonApp(App):
         """Load records in a background thread for large files."""
         records: list[dict] = []
         try:
-            for i, record in enumerate(load_jsonl(self.filename)):
+            # Use format-aware loading with schema normalization
+            for i, record in enumerate(load_records(self.filename)):
                 records.append(record)
                 # Update progress every 1000 records
                 if i % 1000 == 0:
@@ -277,22 +295,21 @@ class JsonComparisonApp(App):
 def main() -> None:
     """Parse arguments and run the application."""
     parser = argparse.ArgumentParser(
-        description="Compare original and processed JSONL records in a terminal UI"
+        description="Compare original and processed dataset records in a terminal UI. "
+        "Supports JSONL, JSON, and Parquet formats."
     )
     parser.add_argument(
         "filename",
-        help="Path to the JSONL file to explore"
+        help="Path to the data file (JSONL, JSON, or Parquet)"
     )
     args = parser.parse_args()
 
     # Verify the file exists
-    try:
-        with open(args.filename, 'r') as f:
-            pass
-    except FileNotFoundError:
+    if not os.path.exists(args.filename):
         print(f"Error: File not found: {args.filename}", file=sys.stderr)
         sys.exit(1)
-    except PermissionError:
+
+    if not os.access(args.filename, os.R_OK):
         print(f"Error: Permission denied: {args.filename}", file=sys.stderr)
         sys.exit(1)
 

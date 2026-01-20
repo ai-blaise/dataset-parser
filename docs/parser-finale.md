@@ -1,6 +1,36 @@
 # Parser Finale
 
-Parser Finale processes JSONL records by modifying assistant messages while preserving the conversation structure.
+Parser Finale processes dataset records by modifying assistant messages while preserving the conversation structure. It supports multiple input and output formats.
+
+## Supported Formats
+
+### Input Formats
+
+| Format | Extensions | Description |
+|--------|------------|-------------|
+| JSONL | `.jsonl` | One JSON object per line (default) |
+| JSON | `.json` | JSON array of objects |
+| Parquet | `.parquet`, `.pq` | Apache Parquet columnar format |
+
+The input format is auto-detected from the file extension, or can be specified with `--input-format`.
+
+### Output Formats
+
+| Format | Description |
+|--------|-------------|
+| `json` | Pretty-printed JSON array (default) |
+| `jsonl` | One JSON object per line |
+| `parquet` | Apache Parquet format |
+| `markdown` | Human-readable Markdown |
+| `text` | Plain text summary |
+
+### Schema Normalization
+
+Records from different sources are normalized to a standard schema:
+
+- Parquet `conversations` is converted to `messages`
+- Parquet `trial_name` is used as `uuid` fallback
+- Missing fields get default values
 
 ## Running Parser Finale
 
@@ -35,8 +65,9 @@ These fields are preserved in the output:
 
 | Option | Description |
 |--------|-------------|
-| `-f, --format FORMAT` | Output format: `json`, `jsonl`, `markdown`, `text` (default: json) |
-| `-o, --output FILE` | Output file path (default: stdout) |
+| `--input-format FORMAT` | Input format: `auto`, `jsonl`, `json`, `parquet` (default: auto) |
+| `-f, --format, --output-format FORMAT` | Output format: `json`, `jsonl`, `parquet`, `markdown`, `text` (default: json) |
+| `-o, --output FILE` | Output file path (default: stdout, required for parquet output) |
 | `-i, --index N` | Process only record at index N |
 | `--start N` | Start index for range processing (default: 0) |
 | `--end N` | End index for range processing |
@@ -77,6 +108,14 @@ Plain text summary of records.
 uv run python -m scripts.parser_finale dataset/file.jsonl -f text
 ```
 
+### Parquet
+
+Apache Parquet columnar format (requires `-o` output file).
+
+```bash
+uv run python -m scripts.parser_finale dataset/file.jsonl -f parquet -o output.parquet
+```
+
 ## Examples
 
 ### Basic Usage
@@ -84,6 +123,32 @@ uv run python -m scripts.parser_finale dataset/file.jsonl -f text
 ```bash
 # JSON output to stdout (default)
 uv run python -m scripts.parser_finale dataset/conversations.jsonl
+```
+
+### Multi-Format Input
+
+```bash
+# Process a Parquet file
+uv run python -m scripts.parser_finale dataset/train-00000-of-00001.parquet
+
+# Process a JSON array file
+uv run python -m scripts.parser_finale dataset/data.json
+
+# Explicit format (when auto-detection fails)
+uv run python -m scripts.parser_finale mydata --input-format jsonl
+```
+
+### Format Conversion
+
+```bash
+# JSONL to Parquet
+uv run python -m scripts.parser_finale data.jsonl -f parquet -o output.parquet
+
+# Parquet to JSONL
+uv run python -m scripts.parser_finale data.parquet -f jsonl -o output.jsonl
+
+# Parquet to JSON
+uv run python -m scripts.parser_finale data.parquet -f json -o output.json
 ```
 
 ### Single Record

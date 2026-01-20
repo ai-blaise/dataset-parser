@@ -1,14 +1,20 @@
 #!/usr/bin/env python3
 """
-JSONL Dataset Explorer
+Dataset Explorer
 
-A CLI tool for exploring JSONL datasets with conversation/tool-calling data.
+A CLI tool for exploring datasets with conversation/tool-calling data.
+Supports JSONL, JSON, and Parquet formats.
 
 Usage:
     python main.py list <file>              List all records with summary
     python main.py show <file> <index>      Show a specific record
     python main.py search <file> <query>    Search for text in records
     python main.py stats <file>             Show dataset statistics
+
+Supported Formats:
+    - JSONL (.jsonl): One JSON object per line
+    - JSON (.json): Array of JSON objects
+    - Parquet (.parquet, .pq): Apache Parquet columnar format
 """
 
 import argparse
@@ -17,22 +23,39 @@ import re
 import sys
 from typing import Any, Iterator
 
-
-def load_jsonl(filename: str) -> Iterator[dict]:
-    """Lazily load records from a JSONL file."""
-    with open(filename, 'r') as f:
-        for line_num, line in enumerate(f, 1):
-            line = line.strip()
-            if line:
-                try:
-                    yield json.loads(line)
-                except json.JSONDecodeError as e:
-                    print(f"Warning: Error parsing line {line_num}: {e}", file=sys.stderr)
+from scripts.data_formats import get_loader, get_loader_for_format, normalize_record
 
 
-def load_jsonl_indexed(filename: str) -> list[dict]:
-    """Load all records into memory with indexing."""
-    return list(load_jsonl(filename))
+def load_records(filename: str, input_format: str = "auto") -> Iterator[dict]:
+    """Lazily load records from a data file with format detection.
+
+    Args:
+        filename: Path to the data file.
+        input_format: Format hint ('auto', 'jsonl', 'json', 'parquet').
+
+    Yields:
+        Each record as a dictionary, normalized to standard schema.
+    """
+    if input_format == "auto":
+        loader = get_loader(filename)
+    else:
+        loader = get_loader_for_format(input_format)
+
+    for record in loader.load(filename):
+        yield normalize_record(record, loader.format_name)
+
+
+def load_records_indexed(filename: str, input_format: str = "auto") -> list[dict]:
+    """Load all records into memory with indexing.
+
+    Args:
+        filename: Path to the data file.
+        input_format: Format hint ('auto', 'jsonl', 'json', 'parquet').
+
+    Returns:
+        List of all records, normalized to standard schema.
+    """
+    return list(load_records(filename, input_format))
 
 
 def truncate(text: str, max_len: int = 50) -> str:
@@ -122,7 +145,7 @@ def cmd_list(args):
     print("-" * len(header))
 
     count = 0
-    for idx, record in enumerate(load_jsonl(args.file)):
+    for idx, record in enumerate(load_records(args.file, args.input_format)):
         summary = get_record_summary(record, idx)
 
         # Apply filters
@@ -152,7 +175,7 @@ def cmd_list(args):
 
 def cmd_show(args):
     """Show a specific record or field."""
-    records = load_jsonl_indexed(args.file)
+    records = load_records_indexed(args.file, args.input_format)
 
     if args.index < 0 or args.index >= len(records):
         print(f"Error: Index {args.index} out of range (0-{len(records)-1})")
@@ -182,7 +205,7 @@ def cmd_search(args):
     print("-" * 60)
 
     matches = 0
-    for idx, record in enumerate(load_jsonl(args.file)):
+    for idx, record in enumerate(load_records(args.file, args.input_format)):
         record_str = json.dumps(record)
         search_str = record_str if args.case_sensitive else record_str.lower()
 
@@ -222,7 +245,7 @@ def cmd_stats(args):
     records_with_reasoning = 0
     tool_names = {}
 
-    for record in load_jsonl(args.file):
+    for record in load_records(args.file, args.input_format):
         total_records += 1
         messages = record.get('messages', [])
         tools = record.get('tools', [])
@@ -275,7 +298,7 @@ def cmd_stats(args):
 
 def main():
     parser = argparse.ArgumentParser(
-        description="JSONL Dataset Explorer",
+        description="Dataset Explorer - Supports JSONL, JSON, and Parquet formats",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=__doc__
     )
@@ -283,33 +306,57 @@ def main():
 
     # List command
     list_parser = subparsers.add_parser('list', help='List records with summary')
-    list_parser.add_argument('file', help='JSONL file path')
+    list_parser.add_argument('file', help='Data file path (JSONL, JSON, or Parquet)')
     list_parser.add_argument('-n', '--limit', type=int, help='Limit number of records')
     list_parser.add_argument('--has-tools', action='store_true', help='Only show records with tools')
     list_parser.add_argument('--has-reasoning', action='store_true', help='Only show records with reasoning')
     list_parser.add_argument('--min-messages', type=int, help='Minimum message count')
+    list_parser.add_argument(
+        '--input-format',
+        choices=['auto', 'jsonl', 'json', 'parquet'],
+        default='auto',
+        help='Input file format (default: auto-detect)'
+    )
     list_parser.set_defaults(func=cmd_list)
 
     # Show command
     show_parser = subparsers.add_parser('show', help='Show a specific record')
-    show_parser.add_argument('file', help='JSONL file path')
+    show_parser.add_argument('file', help='Data file path (JSONL, JSON, or Parquet)')
     show_parser.add_argument('index', type=int, help='Record index (0-based)')
     show_parser.add_argument('-f', '--field', help='Specific field to show (e.g., messages, messages[0], tools)')
+    show_parser.add_argument(
+        '--input-format',
+        choices=['auto', 'jsonl', 'json', 'parquet'],
+        default='auto',
+        help='Input file format (default: auto-detect)'
+    )
     show_parser.set_defaults(func=cmd_show)
 
     # Search command
     search_parser = subparsers.add_parser('search', help='Search for text in records')
-    search_parser.add_argument('file', help='JSONL file path')
+    search_parser.add_argument('file', help='Data file path (JSONL, JSON, or Parquet)')
     search_parser.add_argument('query', help='Search query')
     search_parser.add_argument('-n', '--limit', type=int, default=20, help='Limit results (default: 20)')
     search_parser.add_argument('-c', '--context', action='store_true', help='Show match context')
     search_parser.add_argument('--case-sensitive', action='store_true', help='Case-sensitive search')
+    search_parser.add_argument(
+        '--input-format',
+        choices=['auto', 'jsonl', 'json', 'parquet'],
+        default='auto',
+        help='Input file format (default: auto-detect)'
+    )
     search_parser.set_defaults(func=cmd_search)
 
     # Stats command
     stats_parser = subparsers.add_parser('stats', help='Show dataset statistics')
-    stats_parser.add_argument('file', help='JSONL file path')
+    stats_parser.add_argument('file', help='Data file path (JSONL, JSON, or Parquet)')
     stats_parser.add_argument('-v', '--verbose', action='store_true', help='Show detailed stats')
+    stats_parser.add_argument(
+        '--input-format',
+        choices=['auto', 'jsonl', 'json', 'parquet'],
+        default='auto',
+        help='Input file format (default: auto-detect)'
+    )
     stats_parser.set_defaults(func=cmd_stats)
 
     args = parser.parse_args()
