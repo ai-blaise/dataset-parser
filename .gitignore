@@ -4,3 +4,7 @@
 ./AGENTS.md
 
 ./dataset/
+nemotron/
+parsed_datasets/
+__pycache__/
+*.pyc
