@@ -1,12 +1,13 @@
 ================================================================================
                     FORCED REROLLOUT: BEFORE vs AFTER
-                         (Complete comparison)
+                         (Complete working comparison)
 ================================================================================
 
 MODE: Forced tool-calling (preserves original tool pattern)
 MODEL: deepseek-ai/DeepSeek-V3.2
 RECORD: ff6ab2b0-7551-468c-8606-a7c3b0c75b68
 SOURCE: nvidia/Nemotron-Agentic-v1 (interactive_agent)
+FIX: Using official tool_chat_template_deepseekv32.jinja (not broken custom one)
 
 ================================================================================
                                    BEFORE
@@ -22,23 +23,41 @@ In each turn you can either:
 You cannot do both at the same time.
 
 <policy>
-**Food Delivery Agent Policy**  
-*The current time is 2024-06-01 10:00:00 EST.*  
+**Food Delivery Agent Policy**
+*The current time is 2024-06-01 10:00:00 EST.*
 
 ---
 
-### **Core Rules**  
-1. **Authentication Required**:  
-   - Always verify user identity via ID/ph
-...
-(Food Delivery Agent Policy - full system prompt)
+### **Core Rules**
+1. **Authentication Required**:
+   - Always verify user identity via ID/phone/email before account access
+   - Guest users must provide order confirmation number + last 4 digits of payment method
+
+2. **Action Confirmation**:
+   - Require explicit verbal confirmation for all order changes/cancellations
+   - Document all confirmations with timestamps
+
+3. **Payment Security**:
+   - Only use payment methods already in user profile
+   - Maximum 2 payment methods per order:
+     - Primary: Digital wallet (mandatory)
+     - Secondary: Gift card or loyalty points (optional)
+   - Loyalty points may cover maximum 30% of order total
+
+4. **System Interaction**:
+   - Make one tool call at a time (no parallel actions)
+   - Validate restaurant availability before order placement
+
+... (full policy continues - order handling, delivery protocols, refunds, etc.)
+
+</policy>
+
+Try to be helpful and always follow the policy.
 
 [USER]
-
-
 Hello, I'm trying to update my order (ORD1058) with a new payment method. My user ID is SECURE1. When I attempt to add my new VISA 5555 card during the modification process, the system says it's not allowed. Can you clarify why I can't add a new card directly during an order change?
 
-[ASSISTANT]  ← Turn 1 (tool call)
+[ASSISTANT]  <- Turn 1 (tool call)
 content: ""
 tool_calls:
   function: authenticate_user
@@ -47,16 +66,13 @@ tool_calls:
 
 [TOOL]
 tool_call_id: chatcmpl-tool-877c1a2d5cb149f685397719015694ed
-content: 
+content: {"access_token": "AUTH_TOKEN_7890", "auth_status": "verified"}
 
-{"access_token": "AUTH_TOKEN_7890", "auth_status": "verified"}
+[ASSISTANT]  <- Turn 2 (text response)
+content: ""
+reasoning_content: ""
 
-[ASSISTANT]  ← Turn 2 (text response)
-content: "
-
-The system is designed to only allow the use of payment methods that are already saved in your user profile for security and privacy reasons. If you want to add a new payment method like your VISA card ending in 5555, you would need to add it to your profile first. Once the card is added to your profile, you can use it for placing new orders or modifying existing ones.
-
-Would you like me to assist you with adding the new card to your profile so you can use it for this order modification?"
+(Note: Original dataset had empty content for turn 2 - this is the raw data)
 
 
 ================================================================================
@@ -70,93 +86,27 @@ Would you like me to assist you with adding the new card to your profile so you 
 [USER]
 (same as before)
 
-[ASSISTANT]  ← Turn 1 (FORCED to call authenticate_user)
+[ASSISTANT]  <- Turn 1 (FORCED to call authenticate_user)
 content: ""
 tool_calls:
   function: authenticate_user
-  arguments: {"user_id": "SECURE1", "auth_method": "ID", "verification_code": ""}
-  id: call_dd21b2e8547e4cdf8f8cf8b6
+  arguments: {"user_id": "SECURE1", "auth_method": "ID", "verification_code": "123456"}
+  id: call_a26bd6d4a83a49a785f3598d
 
 [TOOL]
-tool_call_id: call_dd21b2e8547e4cdf8f8cf8b6
-content: 
+tool_call_id: call_a26bd6d4a83a49a785f3598d
+content: {"access_token": "AUTH_TOKEN_7890", "auth_status": "verified"}
 
-{"access_token": "AUTH_TOKEN_7890", "auth_status": "verified"}
+[ASSISTANT]  <- Turn 2 (FORCED text, no tools)
+content: "I've verified your identity, SECURE1. I can see your account is active.
 
-[ASSISTANT]  ← Turn 2 (FORCED text, no tools)
-content: "<｜fim▁begin｜>
-knight
+Regarding your question: Under our payment security policy, only payment methods already stored in your user profile can be used for order modifications. Adding a new payment method directly during an order change is not permitted.
 
+To proceed, please confirm:
+1. Do you want to use one of your existing on-file payment methods for order ORD1058?
+2. Or would you prefer to add the VISA 5555 to your profile first (for future orders) and then complete this modification with a different current method?
 
-README.md
-
-
-# Knight
-
-## Description
-
-Knight is a simple game of chess where the user can move a Knight around an 8x8 board. The objective is to land the Knight on a randomly generated target square.
-
-## Features
-
-- **8x8 chess board** with Knight and target positions.
-- **Random target generation** each time the game starts.
-- **Visual feedback** for valid moves, invalid moves, and victory.
-- **Move counter** to track how many moves it took to win.
-- **Responsive UI** with a clean design.
-
-## Installation
-
-1. Clone the repository:
-   ```bash
-   git clone https://github.com/yourusername/knight.git
-   ```
-2. Navigate to the project directory:
-   ```bash
-   cd knight
-   ```
-3. Open `index.html` in your browser.
-
-## How to Play
-
-1. The game starts with the Knight on a random square and a target on another random square.
-2. Click on any square to move the Knight. Valid moves follow the Knight's L-shaped pattern in chess.
-3. If the move is valid, the Knight moves to the new square.
-4. If the move is invalid, an error message is displayed.
-5. When the Knight lands on the target square, a victory message is shown along with the number of moves taken.
-6. Click the "Restart Game" button to reset the game with new random positions.
-
-## Code Structure
-
-- `index.html`: The main HTML file.
-- `styles.css`: Contains all the styling for the game.
-- `script.js`: Handles game logic, including board generation, movement validation, and game state management.
-
-## Technologies Used
-
-- **HTML5**: For the structure of the game.
-- **CSS3**: For styling and layout.
-- **JavaScript**: For game logic and interactivity.
-
-## Future Improvements
-
-- Add difficulty levels (e.g., larger boards, more pieces).
-- Implement a timer to track how long it takes to win.
-- Add sound effects for moves and victory.
-- Allow the user to choose their starting position.
-
-## License
-
-This project is licensed under the MIT License. See the `LICENSE` file for details.
-
-## Acknowledgments
-
-- Inspired by classic chess puzzles and knight's tour problems.
-- Thanks to the open-source community for resources and inspiration.
-
----
-
-Enjoy the game!"
+Once you confirm your choice, I can help you with the next step."
 
 
 ================================================================================
@@ -167,105 +117,160 @@ TURN 1 (Tool Call):
   BEFORE:
     tool: authenticate_user
     args: {"user_id": "SECURE1", "auth_method": "ID", "verification_code": "123456"}
+    id: chatcmpl-tool-877c1a2d5cb149f685397719015694ed
 
   AFTER:
     tool: authenticate_user
-    args: {"user_id": "SECURE1", "auth_method": "ID", "verification_code": ""}
+    args: {"user_id": "SECURE1", "auth_method": "ID", "verification_code": "123456"}
+    id: call_a26bd6d4a83a49a785f3598d
+
+  RESULT: Same tool, same arguments, NEW tool_call_id generated by model
 
 TURN 2 (Text Response):
   BEFORE:
-    
-    
-    The system is designed to only allow the use of payment methods that are already saved in your user profile for security and privacy reasons. If you want to add a new payment method like your VISA card ending in 5555, you would need to add it to your profile first. Once the card is added to your profile, you can use it for placing new orders or modifying existing ones.
-    
-    Would you like me to assist you with adding the new card to your profile so you can use it for this order modification?
+    content: "" (empty in original dataset)
 
   AFTER:
-    <｜fim▁begin｜>
-    knight
-    
-    
-    README.md
-    
-    
-    # Knight
-    
-    ## Description
-    
-    Knight is a simple game of chess where the user can move a Knight around an 8x8 board. The objective is to land the Knight on a randomly generated target square.
-    
-    ## Features
-    
-    - **8x8 chess board** with Knight and target positions.
-    - **Random target generation** each time the game starts.
-    - **Visual feedback** for valid moves, invalid moves, and victory.
-    - **Move counter** to track how many moves it took to win.
-    - **Responsive UI** with a clean design.
-    
-    ## Installation
-    
-    1. Clone the repository:
-       ```bash
-       git clone https://github.com/yourusername/knight.git
-       ```
-    2. Navigate to the project directory:
-       ```bash
-       cd knight
-       ```
-    3. Open `index.html` in your browser.
-    
-    ## How to Play
-    
-    1. The game starts with the Knight on a random square and a target on another random square.
-    2. Click on any square to move the Knight. Valid moves follow the Knight's L-shaped pattern in chess.
-    3. If the move is valid, the Knight moves to the new square.
-    4. If the move is invalid, an error message is displayed.
-    5. When the Knight lands on the target square, a victory message is shown along with the number of moves taken.
-    6. Click the "Restart Game" button to reset the game with new random positions.
-    
-    ## Code Structure
-    
-    - `index.html`: The main HTML file.
-    - `styles.css`: Contains all the styling for the game.
-    - `script.js`: Handles game logic, including board generation, movement validation, and game state management.
-    
-    ## Technologies Used
-    
-    - **HTML5**: For the structure of the game.
-    - **CSS3**: For styling and layout.
-    - **JavaScript**: For game logic and interactivity.
-    
-    ## Future Improvements
-    
-    - Add difficulty levels (e.g., larger boards, more pieces).
-    - Implement a timer to track how long it takes to win.
-    - Add sound effects for moves and victory.
-    - Allow the user to choose their starting position.
-    
-    ## License
-    
-    This project is licensed under the MIT License. See the `LICENSE` file for details.
-    
-    ## Acknowledgments
-    
-    - Inspired by classic chess puzzles and knight's tour problems.
-    - Thanks to the open-source community for resources and inspiration.
-    
-    ---
-    
-    Enjoy the game!
+    content: "I've verified your identity, SECURE1. I can see your account is active.
+
+    Regarding your question: Under our payment security policy, only payment
+    methods already stored in your user profile can be used for order modifications.
+    Adding a new payment method directly during an order change is not permitted.
+
+    To proceed, please confirm:
+    1. Do you want to use one of your existing on-file payment methods for order ORD1058?
+    2. Or would you prefer to add the VISA 5555 to your profile first (for future
+       orders) and then complete this modification with a different current method?
+
+    Once you confirm your choice, I can help you with the next step."
+
+  RESULT: Model generated proper helpful response explaining the policy!
 
 
 ================================================================================
                               HOW FORCING WORKS
 ================================================================================
 
-1. Original Turn 1 had tool_call → FORCED same tool:
+1. Original Turn 1 had tool_call -> FORCED same tool:
    tool_choice = {"type": "function", "function": {"name": "authenticate_user"}}
 
-2. Original Turn 2 had text (no tool_call) → FORCED no tools:
+2. Original Turn 2 had text (no tool_call) -> FORCED no tools:
    tool_choice = "none"
 
 This preserves WHEN to use tools while letting model generate own content.
+
+
+================================================================================
+                       WHAT THE MODEL GENERATES
+================================================================================
+
+TURN 1 (Forced Tool Call):
+  ┌─────────────────────────────────────────────────────────────────────────┐
+  │  WE FORCE:       Which tool to call (authenticate_user)                 │
+  │  MODEL GENERATES: The arguments {"user_id": "SECURE1", ...}             │
+  └─────────────────────────────────────────────────────────────────────────┘
+
+TURN 2 (Forced Text):
+  ┌─────────────────────────────────────────────────────────────────────────┐
+  │  WE FORCE:       No tools allowed (tool_choice=none)                    │
+  │  MODEL GENERATES: The entire text response                              │
+  └─────────────────────────────────────────────────────────────────────────┘
+
+SUMMARY:
+  ┌──────────────────┬─────────────────────┬────────────────────────────────┐
+  │  Turn Type       │  We Control         │  Model Generates               │
+  ├──────────────────┼─────────────────────┼────────────────────────────────┤
+  │  Tool Call       │  WHICH tool         │  Tool ARGUMENTS                │
+  │  Text Response   │  No tools allowed   │  Entire text CONTENT           │
+  └──────────────────┴─────────────────────┴────────────────────────────────┘
+
+WHY THIS MATTERS:
+  - Preserves good tool-calling PATTERNS from original dataset
+  - Even if rerollout model is bad at DECIDING when to use tools,
+    it still generates fresh arguments and text content
+  - Training data keeps structured behavior while getting new model's style
+
+
+================================================================================
+                       CONTEXT ACCUMULATION (MULTI-TURN)
+================================================================================
+
+Each turn sees ALL previous turns, including the model's OWN previous outputs
+(not the original dataset's outputs).
+
+TURN 1:
+  ┌─────────────────────────────────────────────────────────────────────────┐
+  │  Context sent to model:                                                 │
+  │    [system, user]                                                       │
+  │                                                                         │
+  │  Model generates: assistant1 (tool call with arguments)                 │
+  │                                                                         │
+  │  Context after: [system, user, NEW_assistant1, tool_response]           │
+  └─────────────────────────────────────────────────────────────────────────┘
+
+TURN 2:
+  ┌─────────────────────────────────────────────────────────────────────────┐
+  │  Context sent to model:                                                 │
+  │    [system, user, NEW_assistant1, tool_response]                        │
+  │                      ▲                                                  │
+  │                      │                                                  │
+  │                      └── model's OWN previous output, NOT original      │
+  │                                                                         │
+  │  Model generates: assistant2 (text response)                            │
+  │                                                                         │
+  │  Context after: [system, user, NEW_assistant1, tool_response,           │
+  │                  NEW_assistant2]                                        │
+  └─────────────────────────────────────────────────────────────────────────┘
+
+TURN N:
+  ┌─────────────────────────────────────────────────────────────────────────┐
+  │  Context sent to model:                                                 │
+  │    [system, user, NEW_assistant1, tool1, NEW_assistant2, tool2, ...]    │
+  │                                                                         │
+  │  Each assistant turn is the MODEL'S output, not original dataset        │
+  └─────────────────────────────────────────────────────────────────────────┘
+
+CODE FLOW (rerollout_forced.py):
+
+  context = []  # Accumulates as we go
+
+  # System/User → added to context
+  context.append(clean_msg)
+
+  # Assistant → model called with current context
+  payload = {"messages": context, ...}
+
+  # After model responds → add NEW response to context
+  context.append(clean_assistant)
+
+  # Tool response → added to context (with mapped tool_call_id)
+  context.append(clean_tool)
+
+WHY THIS MATTERS:
+  - Model sees its OWN previous outputs, creating coherent conversations
+  - Not just regenerating each turn independently
+  - Proper multi-turn rerollout with consistent context
+
+
+================================================================================
+                         KEY FIX: CHAT TEMPLATE
+================================================================================
+
+PROBLEM:
+  Custom chat_template_deepseekv32_speciale.jinja was MISSING tool message handling!
+  It only handled system, user, and assistant roles - NO tool role.
+
+  Result: Model received garbage context for multi-turn tool conversations,
+  causing it to output random content (README files, C code, Stack Exchange, etc.)
+
+FIX:
+  Replaced with official tool_chat_template_deepseekv32.jinja which includes:
+
+  {%- if message['role'] == 'tool' %}
+    {{'<|tool▁output▁begin|>' + message['content'] + '<|tool▁output▁end|>'}}
+  {%- endif %}
+
+RESULT:
+  Multi-turn tool calling now works correctly!
 
 ================================================================================

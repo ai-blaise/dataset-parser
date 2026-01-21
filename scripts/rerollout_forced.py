@@ -9,6 +9,27 @@ Preserves the original tool-calling PATTERN from the dataset:
 This ensures training data keeps good tool-calling behavior even if
 the rerollout model is weaker at deciding when to use tools.
 
+WHAT WE FORCE vs WHAT MODEL GENERATES:
+┌──────────────────┬─────────────────────┬────────────────────────────────┐
+│  Turn Type       │  We Control         │  Model Generates               │
+├──────────────────┼─────────────────────┼────────────────────────────────┤
+│  Tool Call       │  WHICH tool         │  Tool ARGUMENTS                │
+│  Text Response   │  No tools allowed   │  Entire text CONTENT           │
+└──────────────────┴─────────────────────┴────────────────────────────────┘
+
+CONTEXT ACCUMULATION (MULTI-TURN):
+  Each turn sees all previous turns, including the model's OWN previous outputs.
+
+  Turn 1: context = [system, user]
+          → model generates assistant1
+          context = [system, user, NEW_assistant1, tool_response]
+
+  Turn 2: context = [system, user, NEW_assistant1, tool_response]
+          → model generates assistant2 (sees its OWN assistant1, not original)
+          context = [system, user, NEW_assistant1, tool_response, NEW_assistant2]
+
+  This creates coherent multi-turn conversations, not independent regenerations.
+
 Usage:
     uv run python scripts/rerollout_forced.py parsed_datasets/interactive_agent_parsed.jsonl -n 1 -v
     uv run python scripts/rerollout_forced.py input.jsonl -n 100 -o rerolled.jsonl
