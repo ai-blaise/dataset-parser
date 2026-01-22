@@ -76,7 +76,8 @@ async def rerollout_record(
     model: str,
     token_stats: TokenStats,
     session: aiohttp.ClientSession,
-    semaphore: asyncio.Semaphore
+    semaphore: asyncio.Semaphore,
+    verbose: bool = False
 ) -> dict:
     """
     Rerollout a single record with forced tool calling + thinking traces.
@@ -98,6 +99,8 @@ async def rerollout_record(
                 clean_msg = {"role": role, "content": msg.get("content", "")}
                 context.append(clean_msg)
                 new_messages.append(clean_msg)
+                if verbose:
+                    print(f"[{role}] Added to context")
                 i += 1
 
             elif role == "assistant":
@@ -110,8 +113,12 @@ async def rerollout_record(
                         "type": "function",
                         "function": {"name": orig_tool_name}
                     }
+                    if verbose:
+                        print(f"[assistant] FORCING tool call: {orig_tool_name}")
                 else:
                     tool_choice = "none"
+                    if verbose:
+                        print(f"[assistant] Generating text (tool_choice=none)")
 
                 # HYBRID APPROACH:
                 # - TOOL CALL turns: thinking=True (works well)
@@ -150,6 +157,8 @@ async def rerollout_record(
                     content = new_assistant.get("content") or ""
                     # Check if content is valid (not empty, not just a tool name)
                     if len(content.strip()) < 30 or content.strip().startswith("get_") or content.strip().startswith("check_"):
+                        if verbose:
+                            print(f"  -> Thinking produced invalid content, retrying without thinking...")
                         new_assistant_retry = await make_request(enable_thinking=False)
                         # Merge: keep reasoning from first attempt, content from retry
                         reasoning_from_first = new_assistant.get("reasoning_content") or ""
@@ -180,6 +189,19 @@ async def rerollout_record(
                             if orig_id and new_id:
                                 tool_id_map[orig_id] = new_id
 
+                    if verbose:
+                        tc = new_tool_calls[0]
+                        print(f"  -> Tool: {tc['function']['name']}")
+                        print(f"     Args: {tc['function']['arguments'][:80]}...")
+                        if reasoning_content:
+                            print(f"     Thinking: {reasoning_content[:80]}...")
+                else:
+                    if verbose:
+                        content_preview = clean_assistant.get("content", "")[:80]
+                        print(f"  -> Content: {content_preview}...")
+                        if reasoning_content:
+                            print(f"     Thinking: {reasoning_content[:80]}...")
+
                 context.append(clean_assistant)
                 new_messages.append(clean_assistant)
                 i += 1
@@ -197,11 +219,16 @@ async def rerollout_record(
                             "content": tool_msg.get("content", "")
                         }
 
+                        if verbose:
+                            print(f"[tool] Mapped ID: {orig_tool_id[:20]}... -> {new_tool_id[:20]}...")
+
                         context.append(clean_tool)
                         new_messages.append(clean_tool)
                         i += 1
                 else:
                     while i < len(original_messages) and original_messages[i].get("role") == "tool":
+                        if verbose:
+                            print(f"[tool] SKIPPED")
                         i += 1
 
             elif role == "tool":
@@ -252,14 +279,15 @@ async def process_record(
     semaphore: asyncio.Semaphore,
     write_lock: asyncio.Lock,
     out_file,
-    counters: dict
+    counters: dict,
+    verbose: bool = False
 ):
     """Process a single record and write result."""
     uuid = record.get("uuid", "unknown")
 
     try:
         rerolled = await rerollout_record(
-            record, api_url, model, token_stats, session, semaphore
+            record, api_url, model, token_stats, session, semaphore, verbose
         )
 
         async with write_lock:
@@ -267,7 +295,7 @@ async def process_record(
             await out_file.flush()
 
         counters["success"] += 1
-        return True, uuid, None
+        return True, uuid, rerolled
 
     except Exception as e:
         async with write_lock:
@@ -301,8 +329,15 @@ async def main_async(args):
     total_records = len(records)
     print(f"Loaded {total_records} records")
 
+    # Handle specific index
+    if args.index is not None:
+        if args.index >= len(records):
+            print(f"Error: Index {args.index} out of range (max {len(records)-1})")
+            return
+        records = [records[args.index]]
+        print(f"Processing specific record at index {args.index}")
     # Limit if specified
-    if args.num:
+    elif args.num:
         records = records[:args.num]
         print(f"Limited to {len(records)} records")
 
@@ -314,6 +349,7 @@ async def main_async(args):
 
     # Filter out already processed
     to_process = [r for r in records if r.get("uuid") not in processed_uuids]
+    original_records = {r.get("uuid"): r for r in to_process}  # Keep originals for proof
     print(f"To process: {len(to_process)} records")
 
     if not to_process:
@@ -348,33 +384,84 @@ async def main_async(args):
             tasks = [
                 process_record(
                     record, args.api_url, args.model,
-                    token_stats, session, semaphore, write_lock, out_file, counters
+                    token_stats, session, semaphore, write_lock, out_file, counters,
+                    verbose=args.verbose
                 )
                 for record in to_process
             ]
 
-            # Progress bar
-            pbar = tqdm(
-                total=len(to_process),
-                desc="Rerolling",
-                unit="rec",
-                bar_format="{l_bar}{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}]"
-            )
-
-            # Process all tasks
-            for coro in asyncio.as_completed(tasks):
-                await coro
-                pbar.update(1)
-
-                # Update postfix
-                stats = token_stats.get_stats()
-                pbar.set_postfix_str(
-                    f"✓{counters['success']} ✗{counters['error']} | "
-                    f"{stats['completion_per_sec']:.0f} tok/s | "
-                    f"total: {format_tokens(stats['total_tokens'])}"
+            # Progress bar (disabled in verbose mode)
+            if not args.verbose:
+                pbar = tqdm(
+                    total=len(to_process),
+                    desc="Rerolling",
+                    unit="rec",
+                    bar_format="{l_bar}{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}]"
                 )
 
-            pbar.close()
+            # Process all tasks
+            rerolled_results = []
+            for coro in asyncio.as_completed(tasks):
+                result = await coro
+                rerolled_results.append(result)
+
+                if not args.verbose:
+                    pbar.update(1)
+                    # Update postfix
+                    stats = token_stats.get_stats()
+                    pbar.set_postfix_str(
+                        f"✓{counters['success']} ✗{counters['error']} | "
+                        f"{stats['completion_per_sec']:.0f} tok/s | "
+                        f"total: {format_tokens(stats['total_tokens'])}"
+                    )
+
+            if not args.verbose:
+                pbar.close()
+
+    # Write proof file if requested
+    if args.proof and rerolled_results:
+        # Find first successful result
+        for success, uuid, result in rerolled_results:
+            if success and isinstance(result, dict):
+                original = original_records.get(uuid)
+                if original:
+                    proof = {
+                        "description": "Forced Tool-Call Rerollout Proof",
+                        "mode": "Hybrid thinking approach",
+                        "model": args.model,
+                        "uuid": uuid,
+                        "BEFORE": original,
+                        "AFTER": result
+                    }
+                    with open(args.proof, "w") as f:
+                        json.dump(proof, f, indent=2)
+                    print(f"Proof written to {args.proof}")
+                    break
+
+    # Verbose comparison output
+    if args.verbose and rerolled_results:
+        print("\n=== COMPARISON ===")
+        for success, uuid, result in rerolled_results[:3]:  # Show first 3
+            if success and isinstance(result, dict):
+                original = original_records.get(uuid)
+                if original:
+                    print(f"\nRecord: {uuid[:12]}...")
+                    print("BEFORE (assistant turns):")
+                    for m in original["messages"]:
+                        if m["role"] == "assistant":
+                            tc = m.get("tool_calls", [])
+                            if tc:
+                                print(f"  TOOL: {tc[0]['function']['name']}")
+                            else:
+                                print(f"  TEXT: \"{m.get('content', '')[:60]}...\"")
+                    print("AFTER (assistant turns):")
+                    for m in result["messages"]:
+                        if m["role"] == "assistant":
+                            tc = m.get("tool_calls", [])
+                            if tc:
+                                print(f"  TOOL: {tc[0]['function']['name']}")
+                            else:
+                                print(f"  TEXT: \"{m.get('content', '')[:60]}...\"")
 
     # Final summary
     stats = token_stats.get_stats()
@@ -404,10 +491,13 @@ def main():
     parser.add_argument("input", help="Input JSONL file")
     parser.add_argument("-o", "--output", help="Output JSONL file (default: input_rerolled.jsonl)")
     parser.add_argument("-n", "--num", type=int, help="Limit number of records to process")
+    parser.add_argument("-i", "--index", type=int, help="Process specific record index only")
     parser.add_argument("--resume", action="store_true", help="Resume from previous run")
     parser.add_argument("--api-url", default="http://localhost:30000/v1/chat/completions")
     parser.add_argument("--model", default="deepseek-ai/DeepSeek-V3.2")
     parser.add_argument("-c", "--concurrency", type=int, default=3000, help="Max concurrent requests")
+    parser.add_argument("-v", "--verbose", action="store_true", help="Verbose output")
+    parser.add_argument("--proof", help="Write before/after proof file (first record)")
 
     args = parser.parse_args()
     asyncio.run(main_async(args))
