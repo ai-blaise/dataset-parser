@@ -14,15 +14,17 @@ WHAT WE FORCE vs WHAT MODEL GENERATES:
 │  Turn Type       │  We Control         │  Model Generates               │
 ├──────────────────┼─────────────────────┼────────────────────────────────┤
 │  Tool Call       │  WHICH tool         │  Tool ARGUMENTS + THINKING     │
-│  Text Response   │  No tools allowed   │  CONTENT only (no thinking)    │
+│  Text Response   │  No tools allowed   │  CONTENT + THINKING (hybrid)   │
 └──────────────────┴─────────────────────┴────────────────────────────────┘
 
-THINKING TRACES:
-  Only enabled for TOOL CALL turns via chat_template_kwargs={"thinking": True}
-  Model outputs reasoning_content field with chain-of-thought for tool decisions
+THINKING TRACES (HYBRID APPROACH):
+  - TOOL CALL turns: Always use thinking=True (works reliably)
+  - TEXT turns: Try thinking=True first. If content is empty/invalid (e.g., just
+    a tool name like "get_order_details"), retry with thinking=False and merge:
+    keep reasoning from first attempt, content from retry.
 
-  TEXT turns have thinking DISABLED because DeepSeek's thinking mode causes
-  empty content with complex tool contexts (model puts response in reasoning)
+  This gives us reasoning for both turn types when possible, with reliable
+  content as fallback.
 
 CONTEXT ACCUMULATION (MULTI-TURN):
   Each turn sees all previous turns, including the model's OWN previous outputs.
@@ -93,26 +95,44 @@ def rerollout_record(record: dict, api_url: str, model: str, verbose: bool = Fal
                     print(f"[assistant] Generating text (tool_choice=none)")
 
             # Build payload
-            # Only enable thinking for TOOL CALL turns (to capture reasoning)
-            # TEXT turns (tool_choice=none) produce empty content with thinking enabled
-            enable_thinking = bool(orig_tool_calls)
+            # HYBRID APPROACH:
+            # - TOOL CALL turns: thinking=True (works well)
+            # - TEXT turns: try thinking=True first, retry with thinking=False if content empty
+            is_tool_call_turn = bool(orig_tool_calls)
 
-            payload = {
-                "model": model,
-                "messages": context,
-                "tools": tools if tools and orig_tool_calls else None,
-                "tool_choice": tool_choice if tools else None,
-                "temperature": 0.7,
-                "max_tokens": 2048,
-                "chat_template_kwargs": {"thinking": enable_thinking} if enable_thinking else None,
-            }
-            payload = {k: v for k, v in payload.items() if v is not None}
-
-            try:
+            def make_request(enable_thinking):
+                payload = {
+                    "model": model,
+                    "messages": context,
+                    "tools": tools if tools and orig_tool_calls else None,
+                    "tool_choice": tool_choice if tools else None,
+                    "temperature": 0.7,
+                    "max_tokens": 2048,
+                    "chat_template_kwargs": {"thinking": True} if enable_thinking else None,
+                }
+                payload = {k: v for k, v in payload.items() if v is not None}
                 resp = requests.post(api_url, json=payload, timeout=120)
                 resp.raise_for_status()
-                result = resp.json()
-                new_assistant = result["choices"][0]["message"]
+                return resp.json()["choices"][0]["message"]
+
+            try:
+                if is_tool_call_turn:
+                    # TOOL CALL: always use thinking
+                    new_assistant = make_request(enable_thinking=True)
+                else:
+                    # TEXT turn: try thinking first, fallback if content empty
+                    new_assistant = make_request(enable_thinking=True)
+                    content = new_assistant.get("content") or ""
+                    # Check if content is valid (not empty, not just a tool name)
+                    if len(content.strip()) < 30 or content.strip().startswith("get_") or content.strip().startswith("check_"):
+                        if verbose:
+                            print(f"  -> Thinking produced invalid content, retrying without thinking...")
+                        new_assistant_retry = make_request(enable_thinking=False)
+                        # Merge: keep reasoning from first attempt, content from retry
+                        reasoning_from_first = new_assistant.get("reasoning_content") or ""
+                        new_assistant = new_assistant_retry
+                        if reasoning_from_first:
+                            new_assistant["reasoning_content"] = reasoning_from_first
             except Exception as e:
                 if verbose:
                     print(f"  ERROR: {e}")

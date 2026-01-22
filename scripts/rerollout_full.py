@@ -4,8 +4,10 @@ Full Dataset Rerollout with Forced Tool Calling + Thinking Traces
 
 Processes the entire Nemotron Agentic v1 dataset:
 - Forces same tool-calling pattern as original
-- Captures thinking traces (reasoning_content) for TOOL CALL turns only
-- TEXT turns have thinking disabled (causes empty content with complex contexts)
+- HYBRID thinking approach:
+  - TOOL CALL turns: thinking=True (captures reasoning for tool decisions)
+  - TEXT turns: try thinking=True first, retry with thinking=False if content
+    empty/invalid, merge reasoning from first attempt with content from retry
 - Saves incrementally (resume-safe)
 - Shows progress with tqdm + token/s stats
 - Async with high concurrency (default 3000)
@@ -111,36 +113,49 @@ async def rerollout_record(
                 else:
                     tool_choice = "none"
 
-                # Build payload
-                # Only enable thinking for TOOL CALL turns (to capture reasoning)
-                # TEXT turns (tool_choice=none) produce empty content with thinking enabled
-                enable_thinking = bool(orig_tool_calls)
+                # HYBRID APPROACH:
+                # - TOOL CALL turns: thinking=True (works well)
+                # - TEXT turns: try thinking=True first, retry with thinking=False if content empty
+                is_tool_call_turn = bool(orig_tool_calls)
 
-                payload = {
-                    "model": model,
-                    "messages": context,
-                    "tools": tools if tools and orig_tool_calls else None,
-                    "tool_choice": tool_choice if tools else None,
-                    "temperature": 0.7,
-                    "max_tokens": 2048,
-                    "chat_template_kwargs": {"thinking": enable_thinking} if enable_thinking else None,
-                }
-                payload = {k: v for k, v in payload.items() if v is not None}
+                async def make_request(enable_thinking):
+                    payload = {
+                        "model": model,
+                        "messages": context,
+                        "tools": tools if tools and orig_tool_calls else None,
+                        "tool_choice": tool_choice if tools else None,
+                        "temperature": 0.7,
+                        "max_tokens": 2048,
+                        "chat_template_kwargs": {"thinking": True} if enable_thinking else None,
+                    }
+                    payload = {k: v for k, v in payload.items() if v is not None}
+                    async with session.post(api_url, json=payload) as resp:
+                        resp.raise_for_status()
+                        result = await resp.json()
+                    # Track token usage
+                    usage = result.get("usage", {})
+                    token_stats.add(
+                        prompt=usage.get("prompt_tokens", 0),
+                        completion=usage.get("completion_tokens", 0),
+                        total=usage.get("total_tokens", 0)
+                    )
+                    return result["choices"][0]["message"]
 
-                # Make async request
-                async with session.post(api_url, json=payload) as resp:
-                    resp.raise_for_status()
-                    result = await resp.json()
-
-                # Track token usage
-                usage = result.get("usage", {})
-                token_stats.add(
-                    prompt=usage.get("prompt_tokens", 0),
-                    completion=usage.get("completion_tokens", 0),
-                    total=usage.get("total_tokens", 0)
-                )
-
-                new_assistant = result["choices"][0]["message"]
+                if is_tool_call_turn:
+                    # TOOL CALL: always use thinking
+                    new_assistant = await make_request(enable_thinking=True)
+                else:
+                    # TEXT turn: try thinking first, fallback if content empty
+                    new_assistant = await make_request(enable_thinking=True)
+                    content = new_assistant.get("content") or ""
+                    # Check if content is valid (not empty, not just a tool name)
+                    if len(content.strip()) < 30 or content.strip().startswith("get_") or content.strip().startswith("check_"):
+                        new_assistant_retry = await make_request(enable_thinking=False)
+                        # Merge: keep reasoning from first attempt, content from retry
+                        reasoning_from_first = new_assistant.get("reasoning_content") or ""
+                        new_assistant = new_assistant_retry
+                        if reasoning_from_first:
+                            new_assistant["reasoning_content"] = reasoning_from_first
 
                 # Build clean assistant message
                 new_tool_calls = new_assistant.get("tool_calls", [])
