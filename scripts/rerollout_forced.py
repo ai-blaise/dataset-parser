@@ -13,9 +13,13 @@ WHAT WE FORCE vs WHAT MODEL GENERATES:
 ┌──────────────────┬─────────────────────┬────────────────────────────────┐
 │  Turn Type       │  We Control         │  Model Generates               │
 ├──────────────────┼─────────────────────┼────────────────────────────────┤
-│  Tool Call       │  WHICH tool         │  Tool ARGUMENTS                │
-│  Text Response   │  No tools allowed   │  Entire text CONTENT           │
+│  Tool Call       │  WHICH tool         │  Tool ARGUMENTS + THINKING     │
+│  Text Response   │  No tools allowed   │  CONTENT + THINKING            │
 └──────────────────┴─────────────────────┴────────────────────────────────┘
+
+THINKING TRACES:
+  Enabled via chat_template_kwargs={"thinking": True}
+  Model outputs reasoning_content field with chain-of-thought
 
 CONTEXT ACCUMULATION (MULTI-TURN):
   Each turn sees all previous turns, including the model's OWN previous outputs.
@@ -93,6 +97,7 @@ def rerollout_record(record: dict, api_url: str, model: str, verbose: bool = Fal
                 "tool_choice": tool_choice if tools else None,
                 "temperature": 0.7,
                 "max_tokens": 2048,
+                "chat_template_kwargs": {"thinking": True},  # Enable thinking traces
             }
             payload = {k: v for k, v in payload.items() if v is not None}
 
@@ -113,11 +118,17 @@ def rerollout_record(record: dict, api_url: str, model: str, verbose: bool = Fal
 
             # Build clean assistant message
             new_tool_calls = new_assistant.get("tool_calls", [])
+            # reasoning_content can be None or a string
+            reasoning_content = new_assistant.get("reasoning_content") or ""
 
             clean_assistant = {
                 "role": "assistant",
                 "content": new_assistant.get("content") or ""
             }
+
+            # Save thinking trace if present
+            if reasoning_content:
+                clean_assistant["reasoning_content"] = reasoning_content
 
             if new_tool_calls:
                 clean_assistant["tool_calls"] = new_tool_calls
@@ -134,10 +145,14 @@ def rerollout_record(record: dict, api_url: str, model: str, verbose: bool = Fal
                     tc = new_tool_calls[0]
                     print(f"  -> Tool: {tc['function']['name']}")
                     print(f"     Args: {tc['function']['arguments'][:80]}...")
+                    if reasoning_content:
+                        print(f"     Thinking: {reasoning_content[:80]}...")
             else:
                 if verbose:
                     content = clean_assistant.get("content", "")[:80]
                     print(f"  -> Content: {content}...")
+                    if reasoning_content:
+                        print(f"     Thinking: {reasoning_content[:80]}...")
 
             context.append(clean_assistant)
             new_messages.append(clean_assistant)
