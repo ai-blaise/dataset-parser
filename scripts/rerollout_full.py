@@ -101,10 +101,10 @@ from dataclasses import dataclass, field
 from typing import Optional
 import threading
 
-# Retry configuration (tuned for local GPU server, not rate-limited APIs)
-MAX_RETRIES = 2
-BASE_DELAY = 0.5  # seconds
-MAX_DELAY = 5.0  # seconds
+# Retry configuration (local GPU server - retry until success)
+MAX_RETRIES = 0  # 0 = infinite retries
+BASE_DELAY = 0.1  # seconds
+MAX_DELAY = 2.0  # seconds
 
 # Retryable exceptions
 RETRYABLE_EXCEPTIONS = (
@@ -215,8 +215,8 @@ async def rerollout_record(
                     }
                     payload = {k: v for k, v in payload.items() if v is not None}
 
-                    last_error = None
-                    for attempt in range(max_retries):
+                    attempt = 0
+                    while True:
                         try:
                             async with session.post(api_url, json=payload) as resp:
                                 resp.raise_for_status()
@@ -230,15 +230,15 @@ async def rerollout_record(
                             )
                             return result["choices"][0]["message"]
                         except RETRYABLE_EXCEPTIONS as e:
-                            last_error = e
-                            if attempt < max_retries - 1:
-                                # Exponential backoff with jitter
-                                delay = min(BASE_DELAY * (2 ** attempt) + random.uniform(0, 1), MAX_DELAY)
-                                if verbose:
-                                    print(f"  -> Retry {attempt + 1}/{max_retries} after {delay:.1f}s: {type(e).__name__}")
-                                await asyncio.sleep(delay)
-                            else:
-                                raise last_error
+                            attempt += 1
+                            # max_retries=0 means infinite, otherwise give up after max_retries
+                            if max_retries > 0 and attempt >= max_retries:
+                                raise e
+                            # Exponential backoff with jitter, capped at MAX_DELAY
+                            delay = min(BASE_DELAY * (2 ** min(attempt, 5)) + random.uniform(0, 0.5), MAX_DELAY)
+                            if verbose:
+                                print(f"  -> Retry {attempt} after {delay:.1f}s: {type(e).__name__}")
+                            await asyncio.sleep(delay)
 
                 if is_tool_call_turn:
                     # TOOL CALL: always use thinking
@@ -479,7 +479,7 @@ async def main_async(args):
     print(f"  Model:       {args.model}")
     print(f"  Output:      {output_path}")
     print(f"  Concurrency: {args.concurrency}")
-    print(f"  Retries:     {args.retries} (with exponential backoff)")
+    print(f"  Retries:     {'infinite' if args.retries == 0 else args.retries} (with exponential backoff)")
     print(f"  Mode:        Forced tool calling + Thinking traces")
     print("=" * 70)
     print()
@@ -615,7 +615,7 @@ def main():
     parser.add_argument("--api-url", default="http://localhost:30000/v1/chat/completions")
     parser.add_argument("--model", default="deepseek-ai/DeepSeek-V3.2")
     parser.add_argument("-c", "--concurrency", type=int, default=3000, help="Max concurrent requests")
-    parser.add_argument("-r", "--retries", type=int, default=2, help="Max retries per request (default: 2)")
+    parser.add_argument("-r", "--retries", type=int, default=0, help="Max retries per request (0=infinite, default: 0)")
     parser.add_argument("-v", "--verbose", action="store_true", help="Verbose output")
     parser.add_argument("--proof", help="Write before/after proof file (first record)")
 
