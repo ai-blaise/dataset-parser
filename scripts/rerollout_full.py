@@ -4,7 +4,8 @@ Full Dataset Rerollout with Forced Tool Calling + Thinking Traces
 
 Processes the entire Nemotron Agentic v1 dataset:
 - Forces same tool-calling pattern as original
-- Captures thinking traces (reasoning_content)
+- Captures thinking traces (reasoning_content) for TOOL CALL turns only
+- TEXT turns have thinking disabled (causes empty content with complex contexts)
 - Saves incrementally (resume-safe)
 - Shows progress with tqdm + token/s stats
 - Async with high concurrency (default 3000)
@@ -111,6 +112,10 @@ async def rerollout_record(
                     tool_choice = "none"
 
                 # Build payload
+                # Only enable thinking for TOOL CALL turns (to capture reasoning)
+                # TEXT turns (tool_choice=none) produce empty content with thinking enabled
+                enable_thinking = bool(orig_tool_calls)
+
                 payload = {
                     "model": model,
                     "messages": context,
@@ -118,7 +123,7 @@ async def rerollout_record(
                     "tool_choice": tool_choice if tools else None,
                     "temperature": 0.7,
                     "max_tokens": 2048,
-                    "chat_template_kwargs": {"thinking": True},
+                    "chat_template_kwargs": {"thinking": enable_thinking} if enable_thinking else None,
                 }
                 payload = {k: v for k, v in payload.items() if v is not None}
 

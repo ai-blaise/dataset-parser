@@ -1,276 +1,106 @@
 ================================================================================
                     FORCED REROLLOUT: BEFORE vs AFTER
-                         (Complete working comparison)
+                         (Complete working solution)
 ================================================================================
 
 MODE: Forced tool-calling (preserves original tool pattern)
 MODEL: deepseek-ai/DeepSeek-V3.2
-RECORD: ff6ab2b0-7551-468c-8606-a7c3b0c75b68
 SOURCE: nvidia/Nemotron-Agentic-v1 (interactive_agent)
-FIX: Using official tool_chat_template_deepseekv32.jinja (not broken custom one)
 
 ================================================================================
-                                   BEFORE
-                    (Original Nemotron dataset - FULL content)
-================================================================================
-
-[SYSTEM]
-You are a customer service agent that helps the user.  The policy that determines how you should respond to requests from users is described below between the <policy> and </policy> tags.
-
-In each turn you can either:
-- Send a message to the user.
-- Make a tool call.
-You cannot do both at the same time.
-
-<policy>
-**Food Delivery Agent Policy**
-*The current time is 2024-06-01 10:00:00 EST.*
-
----
-
-### **Core Rules**
-1. **Authentication Required**:
-   - Always verify user identity via ID/phone/email before account access
-   - Guest users must provide order confirmation number + last 4 digits of payment method
-
-2. **Action Confirmation**:
-   - Require explicit verbal confirmation for all order changes/cancellations
-   - Document all confirmations with timestamps
-
-3. **Payment Security**:
-   - Only use payment methods already in user profile
-   - Maximum 2 payment methods per order:
-     - Primary: Digital wallet (mandatory)
-     - Secondary: Gift card or loyalty points (optional)
-   - Loyalty points may cover maximum 30% of order total
-
-4. **System Interaction**:
-   - Make one tool call at a time (no parallel actions)
-   - Validate restaurant availability before order placement
-
-... (full policy continues - order handling, delivery protocols, refunds, etc.)
-
-</policy>
-
-Try to be helpful and always follow the policy.
-
-[USER]
-Hello, I'm trying to update my order (ORD1058) with a new payment method. My user ID is SECURE1. When I attempt to add my new VISA 5555 card during the modification process, the system says it's not allowed. Can you clarify why I can't add a new card directly during an order change?
-
-[ASSISTANT]  <- Turn 1 (tool call)
-content: ""
-tool_calls:
-  function: authenticate_user
-  arguments: {"user_id": "SECURE1", "auth_method": "ID", "verification_code": "123456"}
-  id: chatcmpl-tool-877c1a2d5cb149f685397719015694ed
-
-[TOOL]
-tool_call_id: chatcmpl-tool-877c1a2d5cb149f685397719015694ed
-content: {"access_token": "AUTH_TOKEN_7890", "auth_status": "verified"}
-
-[ASSISTANT]  <- Turn 2 (text response)
-content: ""
-reasoning_content: ""
-
-(Note: Original dataset had empty content for turn 2 - this is the raw data)
-
-
-================================================================================
-                                   AFTER
-                    (Forced rerollout with DeepSeek-V3.2)
-================================================================================
-
-[SYSTEM]
-(same as before)
-
-[USER]
-(same as before)
-
-[ASSISTANT]  <- Turn 1 (FORCED to call authenticate_user)
-content: ""
-tool_calls:
-  function: authenticate_user
-  arguments: {"user_id": "SECURE1", "auth_method": "ID", "verification_code": "123456"}
-  id: call_a26bd6d4a83a49a785f3598d
-
-[TOOL]
-tool_call_id: call_a26bd6d4a83a49a785f3598d
-content: {"access_token": "AUTH_TOKEN_7890", "auth_status": "verified"}
-
-[ASSISTANT]  <- Turn 2 (FORCED text, no tools)
-content: "I've verified your identity, SECURE1. I can see your account is active.
-
-Regarding your question: Under our payment security policy, only payment methods already stored in your user profile can be used for order modifications. Adding a new payment method directly during an order change is not permitted.
-
-To proceed, please confirm:
-1. Do you want to use one of your existing on-file payment methods for order ORD1058?
-2. Or would you prefer to add the VISA 5555 to your profile first (for future orders) and then complete this modification with a different current method?
-
-Once you confirm your choice, I can help you with the next step."
-
-
-================================================================================
-                                 COMPARISON
-================================================================================
-
-TURN 1 (Tool Call):
-  BEFORE:
-    tool: authenticate_user
-    args: {"user_id": "SECURE1", "auth_method": "ID", "verification_code": "123456"}
-    id: chatcmpl-tool-877c1a2d5cb149f685397719015694ed
-
-  AFTER:
-    tool: authenticate_user
-    args: {"user_id": "SECURE1", "auth_method": "ID", "verification_code": "123456"}
-    id: call_a26bd6d4a83a49a785f3598d
-
-  RESULT: Same tool, same arguments, NEW tool_call_id generated by model
-
-TURN 2 (Text Response):
-  BEFORE:
-    content: "" (empty in original dataset)
-
-  AFTER:
-    content: "I've verified your identity, SECURE1. I can see your account is active.
-
-    Regarding your question: Under our payment security policy, only payment
-    methods already stored in your user profile can be used for order modifications.
-    Adding a new payment method directly during an order change is not permitted.
-
-    To proceed, please confirm:
-    1. Do you want to use one of your existing on-file payment methods for order ORD1058?
-    2. Or would you prefer to add the VISA 5555 to your profile first (for future
-       orders) and then complete this modification with a different current method?
-
-    Once you confirm your choice, I can help you with the next step."
-
-  RESULT: Model generated proper helpful response explaining the policy!
-
-
-================================================================================
-                              HOW FORCING WORKS
-================================================================================
-
-1. Original Turn 1 had tool_call -> FORCED same tool:
-   tool_choice = {"type": "function", "function": {"name": "authenticate_user"}}
-
-2. Original Turn 2 had text (no tool_call) -> FORCED no tools:
-   tool_choice = "none"
-
-This preserves WHEN to use tools while letting model generate own content.
-
-
-================================================================================
-                       WHAT THE MODEL GENERATES
-================================================================================
-
-TURN 1 (Forced Tool Call):
-  ┌─────────────────────────────────────────────────────────────────────────┐
-  │  WE FORCE:       Which tool to call (authenticate_user)                 │
-  │  MODEL GENERATES: The arguments {"user_id": "SECURE1", ...}             │
-  └─────────────────────────────────────────────────────────────────────────┘
-
-TURN 2 (Forced Text):
-  ┌─────────────────────────────────────────────────────────────────────────┐
-  │  WE FORCE:       No tools allowed (tool_choice=none)                    │
-  │  MODEL GENERATES: The entire text response                              │
-  └─────────────────────────────────────────────────────────────────────────┘
-
-SUMMARY:
-  ┌──────────────────┬─────────────────────┬────────────────────────────────┐
-  │  Turn Type       │  We Control         │  Model Generates               │
-  ├──────────────────┼─────────────────────┼────────────────────────────────┤
-  │  Tool Call       │  WHICH tool         │  Tool ARGUMENTS                │
-  │  Text Response   │  No tools allowed   │  Entire text CONTENT           │
-  └──────────────────┴─────────────────────┴────────────────────────────────┘
-
-WHY THIS MATTERS:
-  - Preserves good tool-calling PATTERNS from original dataset
-  - Even if rerollout model is bad at DECIDING when to use tools,
-    it still generates fresh arguments and text content
-  - Training data keeps structured behavior while getting new model's style
-
-
-================================================================================
-                       CONTEXT ACCUMULATION (MULTI-TURN)
-================================================================================
-
-Each turn sees ALL previous turns, including the model's OWN previous outputs
-(not the original dataset's outputs).
-
-TURN 1:
-  ┌─────────────────────────────────────────────────────────────────────────┐
-  │  Context sent to model:                                                 │
-  │    [system, user]                                                       │
-  │                                                                         │
-  │  Model generates: assistant1 (tool call with arguments)                 │
-  │                                                                         │
-  │  Context after: [system, user, NEW_assistant1, tool_response]           │
-  └─────────────────────────────────────────────────────────────────────────┘
-
-TURN 2:
-  ┌─────────────────────────────────────────────────────────────────────────┐
-  │  Context sent to model:                                                 │
-  │    [system, user, NEW_assistant1, tool_response]                        │
-  │                      ▲                                                  │
-  │                      │                                                  │
-  │                      └── model's OWN previous output, NOT original      │
-  │                                                                         │
-  │  Model generates: assistant2 (text response)                            │
-  │                                                                         │
-  │  Context after: [system, user, NEW_assistant1, tool_response,           │
-  │                  NEW_assistant2]                                        │
-  └─────────────────────────────────────────────────────────────────────────┘
-
-TURN N:
-  ┌─────────────────────────────────────────────────────────────────────────┐
-  │  Context sent to model:                                                 │
-  │    [system, user, NEW_assistant1, tool1, NEW_assistant2, tool2, ...]    │
-  │                                                                         │
-  │  Each assistant turn is the MODEL'S output, not original dataset        │
-  └─────────────────────────────────────────────────────────────────────────┘
-
-CODE FLOW (rerollout_forced.py):
-
-  context = []  # Accumulates as we go
-
-  # System/User → added to context
-  context.append(clean_msg)
-
-  # Assistant → model called with current context
-  payload = {"messages": context, ...}
-
-  # After model responds → add NEW response to context
-  context.append(clean_assistant)
-
-  # Tool response → added to context (with mapped tool_call_id)
-  context.append(clean_tool)
-
-WHY THIS MATTERS:
-  - Model sees its OWN previous outputs, creating coherent conversations
-  - Not just regenerating each turn independently
-  - Proper multi-turn rerollout with consistent context
-
-
-================================================================================
-                         KEY FIX: CHAT TEMPLATE
+                              THE FIX
 ================================================================================
 
 PROBLEM:
-  Custom chat_template_deepseekv32_speciale.jinja was MISSING tool message handling!
-  It only handled system, user, and assistant roles - NO tool role.
+  TEXT turns (tool_choice=none) were producing empty content when thinking
+  mode was enabled. The model was putting the response in reasoning_content
+  instead of content.
 
-  Result: Model received garbage context for multi-turn tool conversations,
-  causing it to output random content (README files, C code, Stack Exchange, etc.)
+SOLUTION:
+  Only enable thinking for TOOL CALL turns, not TEXT turns.
+
+  ┌──────────────────┬─────────────────────┬────────────────────────────────┐
+  │  Turn Type       │  Thinking Mode      │  Output                        │
+  ├──────────────────┼─────────────────────┼────────────────────────────────┤
+  │  Tool Call       │  ENABLED            │  reasoning_content + tool_call │
+  │  Text Response   │  DISABLED           │  content only                  │
+  └──────────────────┴─────────────────────┴────────────────────────────────┘
+
+CODE CHANGE (rerollout_full.py, rerollout_forced.py):
+
+  # BEFORE (broken):
+  payload = {
+      ...
+      "chat_template_kwargs": {"thinking": True},  # Always enabled
+  }
+
+  # AFTER (fixed):
+  enable_thinking = bool(orig_tool_calls)  # Only for tool call turns
+
+  payload = {
+      ...
+      "chat_template_kwargs": {"thinking": enable_thinking} if enable_thinking else None,
+  }
+
+================================================================================
+                              RESULTS
+================================================================================
+
+TESTED: 20 records
+
+  TOOL CALL turns: 18 total
+    - All have reasoning_content (100%)
+
+  TEXT turns: 44 total
+    - 42 have proper content (95.5%)
+    - 2 had whitespace only (model variance, not systematic)
+
+VERIFICATION:
+  - Re-running same records produces good results
+  - Empty content is random model variance with temperature=0.7
+  - Can add retry logic for empty TEXT turns if needed
+
+================================================================================
+                              EXAMPLE OUTPUT
+================================================================================
+
+[SYSTEM]
+You are a customer service agent...
+
+[USER]
+Hello, I'm trying to update my order...
+
+[ASSISTANT] <- Turn 1 (FORCED to call authenticate_user)
+content: ""
+reasoning_content: "First, the user is asking about updating their order..."
+tool_calls: [{"function": {"name": "authenticate_user", "arguments": {...}}}]
+
+[TOOL]
+{"access_token": "AUTH_TOKEN_7890", "auth_status": "verified"}
+
+[ASSISTANT] <- Turn 2 (FORCED no tools)
+content: "Thank you for providing your user ID. I have verified your
+identity successfully. Regarding your question about payment methods..."
+reasoning_content: null  (thinking disabled for TEXT turns)
+
+================================================================================
+                         CHAT TEMPLATE FIX
+================================================================================
+
+ALSO FIXED: chat_template_deepseekv32_speciale.jinja
+
+PROBLEM:
+  Generation prompt not added after tool messages.
+
+  Original code:
+    {% if add_generation_prompt and not ns.is_tool %}
+
+  After tool message, ns.is_tool=true, so condition was false.
 
 FIX:
-  Replaced with official tool_chat_template_deepseekv32.jinja which includes:
+    {% if add_generation_prompt %}
+      {% if ns.is_last_user or ns.is_only_sys or ns.is_tool or not ns.is_prefix %}
 
-  {%- if message['role'] == 'tool' %}
-    {{'<|tool▁output▁begin|>' + message['content'] + '<|tool▁output▁end|>'}}
-  {%- endif %}
-
-RESULT:
-  Multi-turn tool calling now works correctly!
+This ensures <|Assistant|><think> is added after tool messages too.
 
 ================================================================================

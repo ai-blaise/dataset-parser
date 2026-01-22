@@ -14,12 +14,15 @@ WHAT WE FORCE vs WHAT MODEL GENERATES:
 │  Turn Type       │  We Control         │  Model Generates               │
 ├──────────────────┼─────────────────────┼────────────────────────────────┤
 │  Tool Call       │  WHICH tool         │  Tool ARGUMENTS + THINKING     │
-│  Text Response   │  No tools allowed   │  CONTENT + THINKING            │
+│  Text Response   │  No tools allowed   │  CONTENT only (no thinking)    │
 └──────────────────┴─────────────────────┴────────────────────────────────┘
 
 THINKING TRACES:
-  Enabled via chat_template_kwargs={"thinking": True}
-  Model outputs reasoning_content field with chain-of-thought
+  Only enabled for TOOL CALL turns via chat_template_kwargs={"thinking": True}
+  Model outputs reasoning_content field with chain-of-thought for tool decisions
+
+  TEXT turns have thinking DISABLED because DeepSeek's thinking mode causes
+  empty content with complex tool contexts (model puts response in reasoning)
 
 CONTEXT ACCUMULATION (MULTI-TURN):
   Each turn sees all previous turns, including the model's OWN previous outputs.
@@ -90,6 +93,10 @@ def rerollout_record(record: dict, api_url: str, model: str, verbose: bool = Fal
                     print(f"[assistant] Generating text (tool_choice=none)")
 
             # Build payload
+            # Only enable thinking for TOOL CALL turns (to capture reasoning)
+            # TEXT turns (tool_choice=none) produce empty content with thinking enabled
+            enable_thinking = bool(orig_tool_calls)
+
             payload = {
                 "model": model,
                 "messages": context,
@@ -97,7 +104,7 @@ def rerollout_record(record: dict, api_url: str, model: str, verbose: bool = Fal
                 "tool_choice": tool_choice if tools else None,
                 "temperature": 0.7,
                 "max_tokens": 2048,
-                "chat_template_kwargs": {"thinking": True},  # Enable thinking traces
+                "chat_template_kwargs": {"thinking": enable_thinking} if enable_thinking else None,
             }
             payload = {k: v for k, v in payload.items() if v is not None}
 
