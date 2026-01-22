@@ -13,6 +13,7 @@ OVERVIEW:
 
 FEATURES:
   - Async processing with configurable concurrency (default: 3000 concurrent requests)
+  - Automatic retry with exponential backoff for transient errors (timeouts, disconnects)
   - Resume support: safely resume interrupted runs without reprocessing
   - Progress bar with real-time token/s statistics
   - Incremental saving: results written immediately, safe against crashes
@@ -93,11 +94,26 @@ import asyncio
 import aiohttp
 import aiofiles
 import time
+import random
 from pathlib import Path
 from tqdm.asyncio import tqdm
 from dataclasses import dataclass, field
 from typing import Optional
 import threading
+
+# Retry configuration
+MAX_RETRIES = 5
+BASE_DELAY = 1.0  # seconds
+MAX_DELAY = 60.0  # seconds
+
+# Retryable exceptions
+RETRYABLE_EXCEPTIONS = (
+    asyncio.TimeoutError,
+    aiohttp.ClientError,
+    aiohttp.ServerDisconnectedError,
+    ConnectionResetError,
+    ConnectionError,
+)
 
 
 @dataclass
@@ -138,7 +154,8 @@ async def rerollout_record(
     token_stats: TokenStats,
     session: aiohttp.ClientSession,
     semaphore: asyncio.Semaphore,
-    verbose: bool = False
+    verbose: bool = False,
+    max_retries: int = MAX_RETRIES
 ) -> dict:
     """
     Rerollout a single record with forced tool calling + thinking traces.
@@ -197,17 +214,31 @@ async def rerollout_record(
                         "chat_template_kwargs": {"thinking": True} if enable_thinking else None,
                     }
                     payload = {k: v for k, v in payload.items() if v is not None}
-                    async with session.post(api_url, json=payload) as resp:
-                        resp.raise_for_status()
-                        result = await resp.json()
-                    # Track token usage
-                    usage = result.get("usage", {})
-                    token_stats.add(
-                        prompt=usage.get("prompt_tokens", 0),
-                        completion=usage.get("completion_tokens", 0),
-                        total=usage.get("total_tokens", 0)
-                    )
-                    return result["choices"][0]["message"]
+
+                    last_error = None
+                    for attempt in range(max_retries):
+                        try:
+                            async with session.post(api_url, json=payload) as resp:
+                                resp.raise_for_status()
+                                result = await resp.json()
+                            # Track token usage
+                            usage = result.get("usage", {})
+                            token_stats.add(
+                                prompt=usage.get("prompt_tokens", 0),
+                                completion=usage.get("completion_tokens", 0),
+                                total=usage.get("total_tokens", 0)
+                            )
+                            return result["choices"][0]["message"]
+                        except RETRYABLE_EXCEPTIONS as e:
+                            last_error = e
+                            if attempt < max_retries - 1:
+                                # Exponential backoff with jitter
+                                delay = min(BASE_DELAY * (2 ** attempt) + random.uniform(0, 1), MAX_DELAY)
+                                if verbose:
+                                    print(f"  -> Retry {attempt + 1}/{max_retries} after {delay:.1f}s: {type(e).__name__}")
+                                await asyncio.sleep(delay)
+                            else:
+                                raise last_error
 
                 if is_tool_call_turn:
                     # TOOL CALL: always use thinking
@@ -341,14 +372,15 @@ async def process_record(
     write_lock: asyncio.Lock,
     out_file,
     counters: dict,
-    verbose: bool = False
+    verbose: bool = False,
+    max_retries: int = MAX_RETRIES
 ):
     """Process a single record and write result."""
     uuid = record.get("uuid", "unknown")
 
     try:
         rerolled = await rerollout_record(
-            record, api_url, model, token_stats, session, semaphore, verbose
+            record, api_url, model, token_stats, session, semaphore, verbose, max_retries
         )
 
         async with write_lock:
@@ -359,17 +391,19 @@ async def process_record(
         return True, uuid, rerolled
 
     except Exception as e:
+        # Build descriptive error message (some exceptions like TimeoutError have empty str)
+        error_msg = str(e) if str(e) else f"{type(e).__name__}: {repr(e)}"
         async with write_lock:
             error_record = {
                 "uuid": uuid,
-                "error": str(e),
+                "error": error_msg,
                 "original": record
             }
             await out_file.write(json.dumps(error_record) + "\n")
             await out_file.flush()
 
         counters["error"] += 1
-        return False, uuid, str(e)
+        return False, uuid, error_msg
 
 
 async def main_async(args):
@@ -422,6 +456,7 @@ async def main_async(args):
     print(f"  Model:       {args.model}")
     print(f"  Output:      {output_path}")
     print(f"  Concurrency: {args.concurrency}")
+    print(f"  Retries:     {args.retries} (with exponential backoff)")
     print(f"  Mode:        Forced tool calling + Thinking traces")
     print("=" * 70)
     print()
@@ -446,7 +481,7 @@ async def main_async(args):
                 process_record(
                     record, args.api_url, args.model,
                     token_stats, session, semaphore, write_lock, out_file, counters,
-                    verbose=args.verbose
+                    verbose=args.verbose, max_retries=args.retries
                 )
                 for record in to_process
             ]
@@ -557,6 +592,7 @@ def main():
     parser.add_argument("--api-url", default="http://localhost:30000/v1/chat/completions")
     parser.add_argument("--model", default="deepseek-ai/DeepSeek-V3.2")
     parser.add_argument("-c", "--concurrency", type=int, default=3000, help="Max concurrent requests")
+    parser.add_argument("-r", "--retries", type=int, default=5, help="Max retries per request (default: 5)")
     parser.add_argument("-v", "--verbose", action="store_true", help="Verbose output")
     parser.add_argument("--proof", help="Write before/after proof file (first record)")
 
