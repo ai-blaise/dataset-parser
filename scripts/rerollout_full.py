@@ -6,7 +6,7 @@ Processes the entire Nemotron Agentic v1 dataset:
 - Forces same tool-calling pattern as original
 - Captures thinking traces (reasoning_content)
 - Saves incrementally (resume-safe)
-- Shows progress
+- Shows progress with tqdm + token/s stats
 
 WHAT WE FORCE vs WHAT MODEL GENERATES:
 ┌──────────────────┬─────────────────────┬────────────────────────────────┐
@@ -26,8 +26,8 @@ Usage:
     # Limit for testing
     uv run python scripts/rerollout_full.py parsed_datasets/interactive_agent_parsed.jsonl -n 100
 
-    # Custom output
-    uv run python scripts/rerollout_full.py input.jsonl -o custom_output.jsonl
+    # With parallel workers
+    uv run python scripts/rerollout_full.py parsed_datasets/interactive_agent_parsed.jsonl -w 4
 """
 
 import json
@@ -36,14 +36,46 @@ import requests
 import time
 import sys
 from pathlib import Path
-from datetime import datetime, timedelta
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import threading
+from tqdm import tqdm
 
 
-def rerollout_record(record: dict, api_url: str, model: str) -> dict:
+class TokenStats:
+    """Thread-safe token statistics tracker."""
+    def __init__(self):
+        self.lock = threading.Lock()
+        self.prompt_tokens = 0
+        self.completion_tokens = 0
+        self.total_tokens = 0
+        self.api_calls = 0
+        self.start_time = time.time()
+
+    def add(self, prompt: int, completion: int, total: int):
+        with self.lock:
+            self.prompt_tokens += prompt
+            self.completion_tokens += completion
+            self.total_tokens += total
+            self.api_calls += 1
+
+    def get_stats(self) -> dict:
+        with self.lock:
+            elapsed = time.time() - self.start_time
+            return {
+                "prompt_tokens": self.prompt_tokens,
+                "completion_tokens": self.completion_tokens,
+                "total_tokens": self.total_tokens,
+                "api_calls": self.api_calls,
+                "elapsed": elapsed,
+                "tokens_per_sec": self.total_tokens / elapsed if elapsed > 0 else 0,
+                "completion_per_sec": self.completion_tokens / elapsed if elapsed > 0 else 0,
+            }
+
+
+def rerollout_record(record: dict, api_url: str, model: str, token_stats: TokenStats) -> dict:
     """
     Rerollout a single record with forced tool calling + thinking traces.
+    Returns the rerolled record.
     """
     original_messages = record.get("messages", [])
     tools = record.get("tools", [])
@@ -92,6 +124,15 @@ def rerollout_record(record: dict, api_url: str, model: str) -> dict:
             resp = requests.post(api_url, json=payload, timeout=180)
             resp.raise_for_status()
             result = resp.json()
+
+            # Track token usage
+            usage = result.get("usage", {})
+            token_stats.add(
+                prompt=usage.get("prompt_tokens", 0),
+                completion=usage.get("completion_tokens", 0),
+                total=usage.get("total_tokens", 0)
+            )
+
             new_assistant = result["choices"][0]["message"]
 
             # Build clean assistant message
@@ -171,14 +212,13 @@ def load_processed_uuids(output_path: Path) -> set:
     return processed
 
 
-def format_time(seconds: float) -> str:
-    """Format seconds as human readable time."""
-    if seconds < 60:
-        return f"{seconds:.0f}s"
-    elif seconds < 3600:
-        return f"{seconds/60:.1f}m"
-    else:
-        return f"{seconds/3600:.1f}h"
+def format_tokens(n: int) -> str:
+    """Format token count with K/M suffix."""
+    if n >= 1_000_000:
+        return f"{n/1_000_000:.1f}M"
+    elif n >= 1_000:
+        return f"{n/1_000:.1f}K"
+    return str(n)
 
 
 def main():
@@ -189,7 +229,6 @@ def main():
     parser.add_argument("--resume", action="store_true", help="Resume from previous run (skip already processed)")
     parser.add_argument("--api-url", default="http://localhost:30000/v1/chat/completions")
     parser.add_argument("--model", default="deepseek-ai/DeepSeek-V3.2")
-    parser.add_argument("--stats-every", type=int, default=10, help="Show stats every N records")
     parser.add_argument("-w", "--workers", type=int, default=1, help="Number of parallel workers")
 
     args = parser.parse_args()
@@ -232,21 +271,17 @@ def main():
 
     print()
     print("=" * 70)
-    print(f"  Model: {args.model}")
-    print(f"  Output: {output_path}")
+    print(f"  Model:   {args.model}")
+    print(f"  Output:  {output_path}")
     print(f"  Workers: {args.workers}")
-    print(f"  Mode: Forced tool calling + Thinking traces")
+    print(f"  Mode:    Forced tool calling + Thinking traces")
     print("=" * 70)
     print()
 
-    # Process records
-    start_time = time.time()
+    # Initialize stats
+    token_stats = TokenStats()
     success_count = 0
     error_count = 0
-    done_count = 0
-    last_uuid = ""
-
-    # Thread safety
     write_lock = threading.Lock()
     counter_lock = threading.Lock()
 
@@ -255,14 +290,15 @@ def main():
     out_f = open(output_path, mode)
 
     def process_one(record):
-        nonlocal success_count, error_count, done_count, last_uuid
+        nonlocal success_count, error_count
         uuid = record.get("uuid", "unknown")
 
         try:
             rerolled = rerollout_record(
                 record,
                 api_url=args.api_url,
-                model=args.model
+                model=args.model,
+                token_stats=token_stats
             )
 
             with write_lock:
@@ -271,10 +307,8 @@ def main():
 
             with counter_lock:
                 success_count += 1
-                done_count += 1
-                last_uuid = uuid[:12]
 
-            return True, uuid
+            return True, uuid, None
 
         except Exception as e:
             with write_lock:
@@ -288,68 +322,56 @@ def main():
 
             with counter_lock:
                 error_count += 1
-                done_count += 1
-                last_uuid = uuid[:12]
 
-            return False, uuid
+            return False, uuid, str(e)
 
-    def update_progress():
-        total = len(to_process)
-        while done_count < total:
-            with counter_lock:
-                done = done_count
-                succ = success_count
-                err = error_count
-                uuid = last_uuid
+    # Process with tqdm
+    with tqdm(total=len(to_process), desc="Rerolling", unit="rec",
+              bar_format="{l_bar}{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}, {rate_fmt}]") as pbar:
 
-            pct = done / total * 100 if total > 0 else 0
-            elapsed = time.time() - start_time
-            rate = done / elapsed if elapsed > 0 else 0
-            eta = (total - done) / rate if rate > 0 else 0
+        def update_postfix():
+            stats = token_stats.get_stats()
+            pbar.set_postfix_str(
+                f"✓{success_count} ✗{error_count} | "
+                f"{stats['completion_per_sec']:.0f} tok/s | "
+                f"total: {format_tokens(stats['total_tokens'])}"
+            )
 
-            bar_width = 30
-            filled = int(bar_width * done / total) if total > 0 else 0
-            bar = "█" * filled + "░" * (bar_width - filled)
-
-            sys.stdout.write(f"\r[{bar}] {done}/{total} ({pct:.1f}%) | "
-                           f"{uuid}... | "
-                           f"✓{succ} ✗{err} | "
-                           f"{rate:.2f}/s | ETA: {format_time(eta)}  ")
-            sys.stdout.flush()
-            time.sleep(0.5)
-
-    # Start progress thread
-    progress_thread = threading.Thread(target=update_progress, daemon=True)
-    progress_thread.start()
-
-    # Process with thread pool
-    if args.workers > 1:
-        with ThreadPoolExecutor(max_workers=args.workers) as executor:
-            futures = [executor.submit(process_one, r) for r in to_process]
-            for future in as_completed(futures):
-                pass  # Results handled in process_one
-    else:
-        for record in to_process:
-            process_one(record)
+        if args.workers > 1:
+            with ThreadPoolExecutor(max_workers=args.workers) as executor:
+                futures = {executor.submit(process_one, r): r for r in to_process}
+                for future in as_completed(futures):
+                    result = future.result()
+                    pbar.update(1)
+                    update_postfix()
+        else:
+            for record in to_process:
+                process_one(record)
+                pbar.update(1)
+                update_postfix()
 
     out_f.close()
 
-    # Wait for final progress update
-    time.sleep(0.6)
-
     # Final summary
-    elapsed = time.time() - start_time
+    stats = token_stats.get_stats()
     print()
     print()
     print("=" * 70)
     print("                         COMPLETED")
     print("=" * 70)
-    print(f"  Total processed: {success_count + error_count}")
-    print(f"  Successful:      {success_count}")
-    print(f"  Errors:          {error_count}")
-    print(f"  Time:            {format_time(elapsed)}")
-    print(f"  Rate:            {(success_count + error_count) / elapsed:.2f} records/sec")
-    print(f"  Output:          {output_path}")
+    print(f"  Records processed:  {success_count + error_count}")
+    print(f"  Successful:         {success_count}")
+    print(f"  Errors:             {error_count}")
+    print(f"  Time:               {stats['elapsed']/60:.1f} min")
+    print(f"  Rate:               {(success_count + error_count) / stats['elapsed']:.2f} rec/s")
+    print()
+    print(f"  Prompt tokens:      {format_tokens(stats['prompt_tokens'])}")
+    print(f"  Completion tokens:  {format_tokens(stats['completion_tokens'])}")
+    print(f"  Total tokens:       {format_tokens(stats['total_tokens'])}")
+    print(f"  Tokens/sec:         {stats['tokens_per_sec']:.0f}")
+    print(f"  Completion tok/s:   {stats['completion_per_sec']:.0f}")
+    print()
+    print(f"  Output:             {output_path}")
     print("=" * 70)
 
 
