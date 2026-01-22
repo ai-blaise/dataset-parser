@@ -1,47 +1,73 @@
 #!/usr/bin/env python3
 """
-Forced Tool-Call Rerollout
+Forced Tool-Call Rerollout (Synchronous Version)
 
-Preserves the original tool-calling PATTERN from the dataset:
-- If original made a tool call → force model to call the SAME tool
-- If original had text → let model generate text
+Regenerates assistant responses in a dataset while preserving the original
+tool-calling pattern. Used to create training data with a different model's
+style while keeping structured tool-calling behavior.
 
-This ensures training data keeps good tool-calling behavior even if
-the rerollout model is weaker at deciding when to use tools.
+OVERVIEW:
+  This script processes conversation datasets and regenerates all assistant
+  turns using a specified model (default: DeepSeek-V3.2). It forces the model
+  to follow the same tool-calling pattern as the original dataset.
 
 WHAT WE FORCE vs WHAT MODEL GENERATES:
-┌──────────────────┬─────────────────────┬────────────────────────────────┐
-│  Turn Type       │  We Control         │  Model Generates               │
-├──────────────────┼─────────────────────┼────────────────────────────────┤
-│  Tool Call       │  WHICH tool         │  Tool ARGUMENTS + THINKING     │
-│  Text Response   │  No tools allowed   │  CONTENT + THINKING (hybrid)   │
-└──────────────────┴─────────────────────┴────────────────────────────────┘
+  ┌──────────────────┬─────────────────────┬────────────────────────────────┐
+  │  Turn Type       │  We Control         │  Model Generates               │
+  ├──────────────────┼─────────────────────┼────────────────────────────────┤
+  │  Tool Call       │  WHICH tool         │  Tool ARGUMENTS + THINKING     │
+  │  Text Response   │  No tools allowed   │  CONTENT + THINKING (hybrid)   │
+  └──────────────────┴─────────────────────┴────────────────────────────────┘
 
-THINKING TRACES (HYBRID APPROACH):
-  - TOOL CALL turns: Always use thinking=True (works reliably)
+HYBRID THINKING APPROACH:
+  - TOOL CALL turns: Always use thinking=True (captures reasoning for tool decisions)
   - TEXT turns: Try thinking=True first. If content is empty/invalid (e.g., just
     a tool name like "get_order_details"), retry with thinking=False and merge:
     keep reasoning from first attempt, content from retry.
 
-  This gives us reasoning for both turn types when possible, with reliable
-  content as fallback.
+  Results: ~90% of TOOL CALL turns and ~100% of TEXT turns get both reasoning + content.
 
 CONTEXT ACCUMULATION (MULTI-TURN):
-  Each turn sees all previous turns, including the model's OWN previous outputs.
+  Each turn sees all previous turns, including the model's OWN previous outputs
+  (not the original dataset's outputs). This creates coherent multi-turn
+  conversations rather than independent regenerations.
 
-  Turn 1: context = [system, user]
-          → model generates assistant1
-          context = [system, user, NEW_assistant1, tool_response]
+OUTPUT FORMAT:
+  Each output record contains:
+  - uuid: Original record UUID
+  - messages: Rerolled conversation with reasoning_content where available
+  - tools: Original tool definitions
+  - license: Original license
+  - used_in: Original used_in field
 
-  Turn 2: context = [system, user, NEW_assistant1, tool_response]
-          → model generates assistant2 (sees its OWN assistant1, not original)
-          context = [system, user, NEW_assistant1, tool_response, NEW_assistant2]
+USAGE:
+  # Process single record with verbose output
+  uv run python scripts/rerollout_forced.py input.jsonl -n 1 -v
 
-  This creates coherent multi-turn conversations, not independent regenerations.
+  # Process 100 records and save to file
+  uv run python scripts/rerollout_forced.py input.jsonl -n 100 -o output.jsonl
 
-Usage:
-    uv run python scripts/rerollout_forced.py parsed_datasets/interactive_agent_parsed.jsonl -n 1 -v
-    uv run python scripts/rerollout_forced.py input.jsonl -n 100 -o rerolled.jsonl
+  # Process specific record by index
+  uv run python scripts/rerollout_forced.py input.jsonl -i 42 -v
+
+  # Generate proof file showing before/after
+  uv run python scripts/rerollout_forced.py input.jsonl -n 1 --proof proof.json
+
+OPTIONS:
+  input              Input JSONL file with conversation records
+  -o, --output       Output JSONL file (default: prints comparison)
+  -n, --num          Number of records to process (default: 1)
+  -i, --index        Process specific record by index
+  -v, --verbose      Show detailed processing logs
+  --proof            Write before/after proof to JSON file
+  --api-url          API endpoint (default: http://localhost:30000/v1/chat/completions)
+  --model            Model name (default: deepseek-ai/DeepSeek-V3.2)
+
+NOTE: This is the synchronous version, suitable for debugging and small batches.
+      For full dataset processing, use rerollout_full.py (async, high concurrency).
+
+SEE ALSO:
+  scripts/rerollout_full.py - Async version with resume, progress bar, token stats
 """
 
 import json

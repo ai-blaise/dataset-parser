@@ -1,29 +1,90 @@
 #!/usr/bin/env python3
 """
-Full Dataset Rerollout with Forced Tool Calling + Thinking Traces
+Forced Tool-Call Rerollout (Async Production Version)
 
-Processes the entire Nemotron Agentic v1 dataset:
-- Forces same tool-calling pattern as original
-- HYBRID thinking approach:
-  - TOOL CALL turns: thinking=True (captures reasoning for tool decisions)
-  - TEXT turns: try thinking=True first, retry with thinking=False if content
-    empty/invalid, merge reasoning from first attempt with content from retry
-- Saves incrementally (resume-safe)
-- Shows progress with tqdm + token/s stats
-- Async with high concurrency (default 3000)
+High-performance async script for regenerating assistant responses across
+entire datasets. Designed for production use with resume support, progress
+tracking, and high concurrency.
 
-Usage:
-    # Full dataset with 3000 concurrent requests
-    uv run python scripts/rerollout_full.py parsed_datasets/interactive_agent_parsed.jsonl
+OVERVIEW:
+  This script processes conversation datasets and regenerates all assistant
+  turns using a specified model (default: DeepSeek-V3.2). It forces the model
+  to follow the same tool-calling pattern as the original dataset.
 
-    # Custom concurrency
-    uv run python scripts/rerollout_full.py parsed_datasets/interactive_agent_parsed.jsonl -c 1000
+FEATURES:
+  - Async processing with configurable concurrency (default: 3000 concurrent requests)
+  - Resume support: safely resume interrupted runs without reprocessing
+  - Progress bar with real-time token/s statistics
+  - Incremental saving: results written immediately, safe against crashes
+  - Verbose mode for debugging
+  - Proof file generation for verification
 
-    # Resume from where you left off
-    uv run python scripts/rerollout_full.py parsed_datasets/interactive_agent_parsed.jsonl --resume
+HYBRID THINKING APPROACH:
+  - TOOL CALL turns: Always use thinking=True (captures reasoning for tool decisions)
+  - TEXT turns: Try thinking=True first. If content is empty/invalid (e.g., just
+    a tool name like "get_order_details"), retry with thinking=False and merge:
+    keep reasoning from first attempt, content from retry.
 
-    # Limit for testing
-    uv run python scripts/rerollout_full.py parsed_datasets/interactive_agent_parsed.jsonl -n 100
+  Results: ~90% of TOOL CALL turns and ~100% of TEXT turns get both reasoning + content.
+
+OUTPUT FORMAT:
+  Each output record contains:
+  - uuid: Original record UUID
+  - messages: Rerolled conversation with reasoning_content where available
+  - tools: Original tool definitions
+  - license: Original license
+  - used_in: Original used_in field
+
+  Error records contain:
+  - uuid: Record UUID
+  - error: Error message
+  - original: Original record for retry
+
+USAGE:
+  # Full dataset with default 3000 concurrent requests
+  uv run python scripts/rerollout_full.py parsed_datasets/interactive_agent_parsed.jsonl
+
+  # Custom concurrency (for rate limiting or resource constraints)
+  uv run python scripts/rerollout_full.py input.jsonl -c 500
+
+  # Resume interrupted run
+  uv run python scripts/rerollout_full.py input.jsonl --resume
+
+  # Limit records for testing
+  uv run python scripts/rerollout_full.py input.jsonl -n 100
+
+  # Process specific record with verbose output
+  uv run python scripts/rerollout_full.py input.jsonl -i 42 -v
+
+  # Generate proof file
+  uv run python scripts/rerollout_full.py input.jsonl -n 1 --proof proof.json -v
+
+OPTIONS:
+  input              Input JSONL file with conversation records
+  -o, --output       Output JSONL file (default: input_rerolled.jsonl)
+  -n, --num          Limit number of records to process
+  -i, --index        Process specific record by index only
+  -c, --concurrency  Max concurrent requests (default: 3000)
+  --resume           Resume from previous run (skip already processed UUIDs)
+  -v, --verbose      Show detailed processing logs (disables progress bar)
+  --proof            Write before/after proof to JSON file (first successful record)
+  --api-url          API endpoint (default: http://localhost:30000/v1/chat/completions)
+  --model            Model name (default: deepseek-ai/DeepSeek-V3.2)
+
+PROGRESS OUTPUT:
+  Rerolling: |████████████████████| 1000/1000 [05:23<00:00]
+  ✓950 ✗50 | 1234 tok/s | total: 5.2M
+
+  - ✓: Successful records
+  - ✗: Failed records (saved with error info for retry)
+  - tok/s: Completion tokens per second
+  - total: Total tokens processed
+
+COMPLETION SUMMARY:
+  Shows records processed, success/error counts, timing, and token statistics.
+
+SEE ALSO:
+  scripts/rerollout_forced.py - Synchronous version for debugging and small batches
 """
 
 import json
