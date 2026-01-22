@@ -101,10 +101,10 @@ from dataclasses import dataclass, field
 from typing import Optional
 import threading
 
-# Retry configuration
-MAX_RETRIES = 5
-BASE_DELAY = 1.0  # seconds
-MAX_DELAY = 60.0  # seconds
+# Retry configuration (tuned for local GPU server, not rate-limited APIs)
+MAX_RETRIES = 2
+BASE_DELAY = 0.5  # seconds
+MAX_DELAY = 5.0  # seconds
 
 # Retryable exceptions
 RETRYABLE_EXCEPTIONS = (
@@ -615,7 +615,7 @@ def main():
     parser.add_argument("--api-url", default="http://localhost:30000/v1/chat/completions")
     parser.add_argument("--model", default="deepseek-ai/DeepSeek-V3.2")
     parser.add_argument("-c", "--concurrency", type=int, default=3000, help="Max concurrent requests")
-    parser.add_argument("-r", "--retries", type=int, default=5, help="Max retries per request (default: 5)")
+    parser.add_argument("-r", "--retries", type=int, default=2, help="Max retries per request (default: 2)")
     parser.add_argument("-v", "--verbose", action="store_true", help="Verbose output")
     parser.add_argument("--proof", help="Write before/after proof file (first record)")
 
