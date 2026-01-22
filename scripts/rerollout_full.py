@@ -337,20 +337,34 @@ async def rerollout_record(
         }
 
 
-def load_processed_uuids(output_path: Path) -> set:
-    """Load UUIDs that have already been processed."""
-    processed = set()
+def load_and_clean_output(output_path: Path) -> tuple[set, set, list]:
+    """Load processed records and separate successful from errors.
+
+    Returns:
+        (successful_uuids, error_uuids, successful_records)
+        - successful_uuids: UUIDs to skip (already done)
+        - error_uuids: UUIDs to retry
+        - successful_records: list of successful record dicts to preserve
+    """
+    successful = set()
+    errors = set()
+    successful_records = []
     if output_path.exists():
         with open(output_path) as f:
             for line in f:
                 if line.strip():
                     try:
                         record = json.loads(line)
-                        if record.get("uuid"):
-                            processed.add(record["uuid"])
+                        uuid = record.get("uuid")
+                        if uuid:
+                            if "error" in record:
+                                errors.add(uuid)
+                            else:
+                                successful.add(uuid)
+                                successful_records.append(record)
                     except:
                         pass
-    return processed
+    return successful, errors, successful_records
 
 
 def format_tokens(n: int) -> str:
@@ -437,13 +451,22 @@ async def main_async(args):
         print(f"Limited to {len(records)} records")
 
     # Check for resume
-    processed_uuids = set()
+    successful_uuids = set()
+    error_uuids = set()
+    successful_records = []
     if args.resume and output_path.exists():
-        processed_uuids = load_processed_uuids(output_path)
-        print(f"Resuming: {len(processed_uuids)} already processed")
+        successful_uuids, error_uuids, successful_records = load_and_clean_output(output_path)
+        print(f"Resuming: {len(successful_uuids)} successful (skip), {len(error_uuids)} errors (retry)")
 
-    # Filter out already processed
-    to_process = [r for r in records if r.get("uuid") not in processed_uuids]
+        # Rewrite output file with only successful records (removes old errors)
+        if error_uuids:
+            with open(output_path, "w") as f:
+                for record in successful_records:
+                    f.write(json.dumps(record) + "\n")
+            print(f"Cleaned output file: removed {len(error_uuids)} error records for retry")
+
+    # Filter out already successful records (errors will be retried)
+    to_process = [r for r in records if r.get("uuid") not in successful_uuids]
     original_records = {r.get("uuid"): r for r in to_process}  # Keep originals for proof
     print(f"To process: {len(to_process)} records")
 
