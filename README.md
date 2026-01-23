@@ -8,6 +8,7 @@ A toolkit for exploring and transforming datasets containing AI conversation dat
 - **Parser Finale** - Transform datasets by removing assistant responses
 - **TUI Application** - Interactive terminal interface for browsing datasets
 - **Data Splitter** - Split large JSONL datasets into N equal parts for parallel processing
+- **Rerollout** - Regenerate assistant responses with a different model while preserving tool-calling patterns
 - **Multi-Format Support** - Load data from JSONL, JSON, and Parquet formats with automatic detection
 
 ## Requirements
@@ -67,6 +68,26 @@ python scripts/data_splitter.py dataset/conversations.jsonl -n 4
 # Preview split without creating files
 python scripts/data_splitter.py dataset/conversations.jsonl -n 10 --dry-run
 ```
+
+### Rerollout dataset with a different model
+
+Regenerate assistant responses using a local model while preserving the original tool-calling pattern. Requires a running [sglang](https://github.com/sgl-project/sglang) server.
+
+```bash
+# Full dataset rerollout with 3000 concurrent requests (production)
+uv run python scripts/rerollout_full.py parsed_datasets/interactive_agent_parsed.jsonl -c 3000
+
+# Resume interrupted run
+uv run python scripts/rerollout_full.py parsed_datasets/interactive_agent_parsed.jsonl -c 3000 --resume
+
+# Test with a few records first
+uv run python scripts/rerollout_full.py parsed_datasets/interactive_agent_parsed.jsonl -n 10 -v
+
+# Sync version for debugging (single record)
+uv run python scripts/rerollout_forced.py parsed_datasets/interactive_agent_parsed.jsonl -n 1 -v
+```
+
+Output is saved to `<input>_rerolled.jsonl` with incremental writes (crash-safe).
 
 ## Usage
 
@@ -132,6 +153,8 @@ data-gen/
 │   ├── main.py           # CLI tool
 │   ├── parser_finale.py  # Transformation engine
 │   ├── data_splitter.py  # Dataset splitting utility
+│   ├── rerollout_full.py # Async rerollout (production)
+│   ├── rerollout_forced.py # Sync rerollout (debugging)
 │   ├── data_formats/     # Multi-format data loaders
 │   │   ├── base.py       # Abstract base loader class
 │   │   ├── jsonl_loader.py
