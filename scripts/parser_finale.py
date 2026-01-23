@@ -251,6 +251,7 @@ def write_json_array(
 
 def main() -> None:
     """Main entry point for parser_finale."""
+    # Define args
     parser = argparse.ArgumentParser(
         description="Parse datasets and output content with emptied assistant responses. "
         "Supports JSONL, JSON, and Parquet input/output formats."
@@ -315,7 +316,7 @@ def main() -> None:
     # Determine if path is file or directory
     if os.path.isdir(args.path):
         # Directory mode - launch TUI with file picker
-        from scripts.tui.app import JsonComparisonApp
+        from scripts.tui.app import JsonComparisonApp # weird way to do it but sure
         app = JsonComparisonApp(
             path=args.path,
             input_format=args.input_format,
@@ -349,7 +350,7 @@ def main() -> None:
         output = output_file
 
     try:
-        # Select formatter (for text-based formats)
+        # Select formatter
         formatters = {
             "json": lambda r: format_json(r, not args.compact),
             "jsonl": format_jsonl,

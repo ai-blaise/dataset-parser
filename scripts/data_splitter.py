@@ -21,7 +21,9 @@ def count_records(filepath: Path) -> int:
             count += 1
     return count
 
-
+# NOTE: in the future there should be a better way to shard the datasets 
+# for now this is the easiest way ti do this and take into account
+# even & odd counts for number of datasets
 def get_part_bounds(total: int, num_parts: int, part_idx: int) -> tuple[int, int]:
     """Calculate start/end indices for a given part."""
     base = total // num_parts
