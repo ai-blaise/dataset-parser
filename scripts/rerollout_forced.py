@@ -73,12 +73,19 @@ SEE ALSO:
 import json
 import argparse
 import requests
+import uuid
 from pathlib import Path
 
 
-def rerollout_record(record: dict, api_url: str, model: str, verbose: bool = False) -> dict:
+DEFAULT_SYSTEM_PROMPT = """You are a helpful assistant with access to tools. When tools return data, treat all responses as real and accurate. Respond naturally and helpfully based on the information provided. Do not question the authenticity or validity of tool outputs."""
+
+
+def rerollout_record(record: dict, api_url: str, model: str, verbose: bool = False, inject_system_prompt: bool = True) -> dict:
     """
     Rerollout with forced tool calling pattern from original.
+
+    Args:
+        inject_system_prompt: If True and system message is empty, inject a default prompt
     """
     original_messages = record.get("messages", [])
     tools = record.get("tools", [])
@@ -87,36 +94,62 @@ def rerollout_record(record: dict, api_url: str, model: str, verbose: bool = Fal
     new_messages = []
     tool_id_map = {}
 
+    # Check if we need to inject a system prompt
+    has_system = any(m.get("role") == "system" and m.get("content", "").strip() for m in original_messages)
+    if inject_system_prompt and not has_system:
+        system_msg = {"role": "system", "content": DEFAULT_SYSTEM_PROMPT}
+        context.append(system_msg)
+        new_messages.append(system_msg)
+        if verbose:
+            print(f"[system] Injected default system prompt")
+
     i = 0
     while i < len(original_messages):
         msg = original_messages[i]
         role = msg.get("role")
 
-        if role == "system" or role == "user":
+        if role == "system":
+            content = msg.get("content", "").strip()
+            if content:
+                # Non-empty system message - use it
+                clean_msg = {"role": "system", "content": content}
+                context.append(clean_msg)
+                new_messages.append(clean_msg)
+                if verbose:
+                    print(f"[system] Using original system prompt")
+            else:
+                # Empty system message - skip (we already injected default if needed)
+                if verbose:
+                    print(f"[system] Skipped empty original system message")
+            i += 1
+
+        elif role == "user":
             clean_msg = {"role": role, "content": msg.get("content", "")}
             context.append(clean_msg)
             new_messages.append(clean_msg)
             if verbose:
-                print(f"[{role}] Added to context")
+                print(f"[user] Added to context")
             i += 1
 
         elif role == "assistant":
             orig_tool_calls = msg.get("tool_calls", [])
-            orig_content = msg.get("content", "")
+            orig_content = (msg.get("content") or "").strip()
 
-            # Determine tool_choice based on original behavior
-            if orig_tool_calls:
-                # Original made a tool call - FORCE the same tool
+            # Detect pattern: content + tool_calls (rare ~0.2% but important)
+            has_both = bool(orig_tool_calls) and bool(orig_content)
+
+            if has_both:
+                # BOTH content AND tool_calls - need two-step generation
                 orig_tool_name = orig_tool_calls[0]["function"]["name"]
-                tool_choice = {
-                    "type": "function",
-                    "function": {"name": orig_tool_name}
-                }
+                if verbose:
+                    print(f"[assistant] BOTH mode: content + tool call ({orig_tool_name})")
+            elif orig_tool_calls:
+                # Original made a tool call only - FORCE the same tool
+                orig_tool_name = orig_tool_calls[0]["function"]["name"]
                 if verbose:
                     print(f"[assistant] FORCING tool call: {orig_tool_name}")
             else:
-                # Original had text content - let model generate text (no tools)
-                tool_choice = "none"
+                # Original had text content only - let model generate text (no tools)
                 if verbose:
                     print(f"[assistant] Generating text (tool_choice=none)")
 
@@ -124,36 +157,87 @@ def rerollout_record(record: dict, api_url: str, model: str, verbose: bool = Fal
             # HYBRID APPROACH:
             # - TOOL CALL turns: thinking=True (works well)
             # - TEXT turns: try thinking=True first, retry with thinking=False if content empty
+            # - BOTH turns: generate content first, then force tool call, merge together
             is_tool_call_turn = bool(orig_tool_calls)
 
-            def make_request(enable_thinking):
+            def make_request(enable_thinking, force_tool=None, allow_tools=True):
+                """
+                Make API request with configurable tool behavior.
+                force_tool: None = no forcing, "none" = disable tools, {"name": X} = force specific tool
+                """
+                if force_tool == "none":
+                    tc = "none"
+                    t = tools if tools and allow_tools else None
+                elif force_tool:
+                    tc = {"type": "function", "function": {"name": force_tool}}
+                    t = tools if tools else None
+                else:
+                    tc = None
+                    t = tools if tools else None
+
                 payload = {
                     "model": model,
                     "messages": context,
-                    "tools": tools if tools and orig_tool_calls else None,
-                    "tool_choice": tool_choice if tools else None,
+                    "tools": t,
+                    "tool_choice": tc,
                     "temperature": 0.7,
                     "max_tokens": 2048,
                     "chat_template_kwargs": {"thinking": True} if enable_thinking else None,
                 }
                 payload = {k: v for k, v in payload.items() if v is not None}
                 resp = requests.post(api_url, json=payload, timeout=120)
+                if resp.status_code != 200:
+                    print(f"  API Error {resp.status_code}: {resp.text[:500]}")
                 resp.raise_for_status()
                 return resp.json()["choices"][0]["message"]
 
             try:
-                if is_tool_call_turn:
-                    # TOOL CALL: always use thinking
-                    new_assistant = make_request(enable_thinking=True)
+                if has_both:
+                    # BOTH content + tool_calls: two-step generation
+                    # Step 1: Generate content preamble (no tools)
+                    if verbose:
+                        print(f"  Step 1: Generating content preamble...")
+                    content_response = make_request(enable_thinking=True, force_tool="none", allow_tools=False)
+                    preamble_content = content_response.get("content") or ""
+                    preamble_reasoning = content_response.get("reasoning_content") or ""
+
+                    if verbose:
+                        print(f"    -> Preamble: {preamble_content[:60]}...")
+
+                    # Step 2: Force the tool call
+                    if verbose:
+                        print(f"  Step 2: Forcing tool call: {orig_tool_name}...")
+                    tool_response = make_request(enable_thinking=True, force_tool=orig_tool_name)
+
+                    # Step 3: Merge - content from step 1, tool_calls from step 2, combine reasoning
+                    tool_reasoning = tool_response.get("reasoning_content") or ""
+                    combined_reasoning = ""
+                    if preamble_reasoning and tool_reasoning:
+                        combined_reasoning = f"[Content reasoning]\n{preamble_reasoning}\n\n[Tool reasoning]\n{tool_reasoning}"
+                    elif preamble_reasoning:
+                        combined_reasoning = preamble_reasoning
+                    elif tool_reasoning:
+                        combined_reasoning = tool_reasoning
+
+                    new_assistant = {
+                        "role": "assistant",
+                        "content": preamble_content,
+                        "tool_calls": tool_response.get("tool_calls"),
+                        "reasoning_content": combined_reasoning if combined_reasoning else None
+                    }
+
+                elif is_tool_call_turn:
+                    # TOOL CALL only: force the tool with thinking
+                    new_assistant = make_request(enable_thinking=True, force_tool=orig_tool_name)
                 else:
-                    # TEXT turn: try thinking first, fallback if content empty
-                    new_assistant = make_request(enable_thinking=True)
+                    # TEXT only: try thinking first, fallback if content empty
+                    new_assistant = make_request(enable_thinking=True, force_tool="none")
                     content = new_assistant.get("content") or ""
                     # Check if content is valid (not empty, not just a tool name)
                     if len(content.strip()) < 30 or content.strip().startswith("get_") or content.strip().startswith("check_"):
                         if verbose:
                             print(f"  -> Thinking produced invalid content, retrying without thinking...")
-                        new_assistant_retry = make_request(enable_thinking=False)
+                        new_assistant_retry = make_request(enable_thinking=False, force_tool="none")
                         # Merge: keep reasoning from first attempt, content from retry
                         reasoning_from_first = new_assistant.get("reasoning_content") or ""
                         new_assistant = new_assistant_retry
@@ -196,8 +280,15 @@ def rerollout_record(record: dict, api_url: str, model: str, verbose: bool = Fal
 
                 if verbose:
                     tc = new_tool_calls[0]
-                    print(f"  -> Tool: {tc['function']['name']}")
-                    print(f"     Args: {tc['function']['arguments'][:80]}...")
+                    content_str = clean_assistant.get("content", "")
+                    if content_str:
+                        # BOTH mode - show content + tool
+                        print(f"  -> Content: {content_str[:60]}...")
+                        print(f"  -> Tool: {tc['function']['name']}")
+                    else:
+                        print(f"  -> Tool: {tc['function']['name']}")
+                    args_str = tc['function']['arguments'] if isinstance(tc['function']['arguments'], str) else json.dumps(tc['function']['arguments'])
+                    print(f"     Args: {args_str[:80]}...")
                     if reasoning_content:
                         print(f"     Thinking: {reasoning_content[:80]}...")
             else:
@@ -215,17 +306,20 @@ def rerollout_record(record: dict, api_url: str, model: str, verbose: bool = Fal
             if new_tool_calls:
                 while i < len(original_messages) and original_messages[i].get("role") == "tool":
                     tool_msg = original_messages[i]
-                    orig_tool_id = tool_msg.get("tool_call_id")
-                    new_tool_id = tool_id_map.get(orig_tool_id, new_tool_calls[0].get("id"))
+                    orig_tool_id = tool_msg.get("tool_call_id") or ""
+                    new_tool_id = tool_id_map.get(orig_tool_id) or new_tool_calls[0].get("id") or f"call_{uuid.uuid4().hex[:24]}"
 
+                    tool_content = tool_msg.get("content", "")
+                    if not isinstance(tool_content, str):
+                        tool_content = json.dumps(tool_content)
                     clean_tool = {
                         "role": "tool",
                         "tool_call_id": new_tool_id,
-                        "content": tool_msg.get("content", "")
+                        "content": tool_content
                     }
 
                     if verbose:
-                        print(f"[tool] Mapped ID: {orig_tool_id[:20]}... -> {new_tool_id[:20]}...")
+                        print(f"[tool] Mapped ID: {orig_tool_id[:20] if orig_tool_id else 'N/A'}... -> {new_tool_id[:20]}...")
 
                     context.append(clean_tool)
                     new_messages.append(clean_tool)
@@ -264,6 +358,8 @@ def main():
     parser.add_argument("--model", default="deepseek-ai/DeepSeek-V3.2")
     parser.add_argument("-v", "--verbose", action="store_true")
     parser.add_argument("--proof", help="Write before/after proof file")
+    parser.add_argument("--no-inject-system", action="store_true",
+                       help="Don't inject default system prompt for empty system messages")
 
     args = parser.parse_args()
 
@@ -300,7 +396,8 @@ def main():
             original,
             api_url=args.api_url,
             model=args.model,
-            verbose=args.verbose
+            verbose=args.verbose,
+            inject_system_prompt=not args.no_inject_system
         )
         results.append((original, rerolled))
         print()
@@ -334,8 +431,10 @@ def main():
                 if m["role"] == "assistant":
                     tc = m.get("tool_calls", [])
                     if tc:
+                        args = tc[0]['function']['arguments']
+                        args_str = args if isinstance(args, str) else json.dumps(args)
                         print(f"  TOOL: {tc[0]['function']['name']}")
-                        print(f"    args: {tc[0]['function']['arguments'][:60]}...")
+                        print(f"    args: {args_str[:60]}...")
                     else:
                         print(f"  TEXT: \"{m.get('content', '')[:60]}...\"")
 
@@ -344,8 +443,10 @@ def main():
                 if m["role"] == "assistant":
                     tc = m.get("tool_calls", [])
                     if tc:
+                        args = tc[0]['function']['arguments']
+                        args_str = args if isinstance(args, str) else json.dumps(args)
                         print(f"  TOOL: {tc[0]['function']['name']}")
-                        print(f"    args: {tc[0]['function']['arguments'][:60]}...")
+                        print(f"    args: {args_str[:60]}...")
                     else:
                         print(f"  TEXT: \"{m.get('content', '')[:60]}...\"")
 
