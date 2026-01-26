@@ -1,8 +1,6 @@
 .beads
 .claude
 
-graveyard_of_plans/
-
 ./dataset/
 nemotron/
 parsed_datasets/
