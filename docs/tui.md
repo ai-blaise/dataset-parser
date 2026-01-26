@@ -1,6 +1,6 @@
 # TUI Application Guide
 
-The TUI (Terminal User Interface) provides an interactive way to browse and analyze datasets containing AI conversation data. It supports multiple file formats including JSONL, JSON, and Parquet.
+The TUI provides an interactive way to browse and analyze datasets containing AI conversation data. It supports multiple file formats including JSONL, JSON, and Parquet.
 
 ## Supported File Formats
 
@@ -12,8 +12,7 @@ The TUI (Terminal User Interface) provides an interactive way to browse and anal
 
 The TUI automatically detects the file format from the extension. The title bar displays the detected format (e.g., "Dataset Viewer - data.parquet (parquet)").
 
-### Schema Normalization
-
+### Schema Normalization (still needs some work)
 Different formats may use different field names. The TUI normalizes all records to a standard schema:
 
 - Parquet files using `conversations` are converted to `messages`
@@ -60,7 +59,7 @@ uv run python -m scripts.tui.app /path/to/data/directory
 ```
 
 In directory mode:
-- Select a file from the list to view its records
+- Select a file from the list to view its records (`ENTER`)
 - Press `ESC` or `b` from the Record List to return to the file picker
 - File sizes are displayed for easy identification
 
@@ -149,7 +148,7 @@ The main screen displays all records in a table format:
 
 **Navigation:**
 
-- Use arrow keys to move between cells
+- Use arrow keys to move between cells (will add vim keybindings very soon ;))
 - Press `Enter` to view full record details
 - Press `m` to see detailed information for the current cell
 

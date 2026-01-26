@@ -1,18 +1,15 @@
-# data-gen
+# dataset-parser
 
-A toolkit for exploring and transforming datasets containing AI conversation data. Provides CLI tools and an interactive TUI.
+An internal tool we built for exploring and transforming datasets containing AI conversation data. Provides CLI tools and an interactive TUI.
 
 ## Features
-
 - **CLI Tool** - List, search, and analyze records from the command line
 - **Parser Finale** - Transform datasets by removing assistant responses
 - **TUI Application** - Interactive terminal interface for browsing datasets
 - **Data Splitter** - Split large JSONL datasets into N equal parts for parallel processing
-- **Rerollout** - Regenerate assistant responses with a different model while preserving tool-calling patterns
 - **Multi-Format Support** - Load data from JSONL, JSON, and Parquet formats with automatic detection
 
 ## Requirements
-
 - Python 3.12+
 - [uv](https://github.com/astral-sh/uv) (recommended) or pip
 
@@ -22,7 +19,7 @@ A toolkit for exploring and transforming datasets containing AI conversation dat
 
 ```bash
 git clone <repository-url>
-cd data-gen
+cd dataset-parser
 uv sync
 ```
 
@@ -30,7 +27,7 @@ uv sync
 
 ```bash
 git clone <repository-url>
-cd data-gen
+cd dataset-parser
 pip install -e .
 ```
 
@@ -68,26 +65,6 @@ python scripts/data_splitter.py dataset/conversations.jsonl -n 4
 # Preview split without creating files
 python scripts/data_splitter.py dataset/conversations.jsonl -n 10 --dry-run
 ```
-
-### Rerollout dataset with a different model
-
-Regenerate assistant responses using a local model while preserving the original tool-calling pattern. Requires a running [sglang](https://github.com/sgl-project/sglang) server.
-
-```bash
-# Full dataset rerollout with 3000 concurrent requests (production)
-uv run python scripts/rerollout_full.py parsed_datasets/interactive_agent_parsed.jsonl -c 3000
-
-# Resume interrupted run
-uv run python scripts/rerollout_full.py parsed_datasets/interactive_agent_parsed.jsonl -c 3000 --resume
-
-# Test with a few records first
-uv run python scripts/rerollout_full.py parsed_datasets/interactive_agent_parsed.jsonl -n 10 -v
-
-# Sync version for debugging (single record)
-uv run python scripts/rerollout_forced.py parsed_datasets/interactive_agent_parsed.jsonl -n 1 -v
-```
-
-Output is saved to `<input>_rerolled.jsonl` with incremental writes (crash-safe).
 
 ## Usage
 
@@ -148,13 +125,11 @@ uv run pytest tests/
 ### Project Structure
 
 ```
-data-gen/
+dataset-parser/
 ├── scripts/              # Main application code
 │   ├── main.py           # CLI tool
 │   ├── parser_finale.py  # Transformation engine
 │   ├── data_splitter.py  # Dataset splitting utility
-│   ├── rerollout_full.py # Async rerollout (production)
-│   ├── rerollout_forced.py # Sync rerollout (debugging)
 │   ├── data_formats/     # Multi-format data loaders
 │   │   ├── base.py       # Abstract base loader class
 │   │   ├── jsonl_loader.py

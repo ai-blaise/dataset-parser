@@ -1,6 +1,6 @@
 # Record Structure
 
-This document describes the JSONL record format used by data-gen.
+This document describes the JSONL record format used by dataset-parser.
 
 ## Overview
 

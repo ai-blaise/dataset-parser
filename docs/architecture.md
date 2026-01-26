@@ -1,10 +1,10 @@
 # Architecture Overview
 
-This document describes the architecture of the data-gen JSONL dataset exploration tool.
+This document describes the architecture of the dataset-parser JSONL dataset exploration tool.
 
 ## System Overview
 
-data-gen is a modular toolkit for exploring and transforming JSONL datasets containing AI conversation data. It provides three main interfaces:
+dataset-parser is a modular toolkit for exploring and transforming JSONL datasets containing AI conversation data. It provides three main interfaces:
 
 1. **CLI Tool** - Command-line interface for dataset exploration
 2. **Parser Finale** - Core transformation engine for processing records
@@ -14,7 +14,7 @@ data-gen is a modular toolkit for exploring and transforming JSONL datasets cont
 ## Directory Structure
 
 ```
-data-gen/
+dataset-parser/
 ├── main.py                    # Stub entry point
 ├── pyproject.toml             # Project metadata and dependencies
 ├── uv.lock                    # Dependency lock file
@@ -53,7 +53,7 @@ data-gen/
 
 ```
 ┌─────────────────────────────────────────────────────────┐
-│                  data-gen Application                   │
+│               dataset-parser Application                │
 ├─────────────────────────────────────────────────────────┤
 │                                                         │
 │  ┌───────────────┬─────────────────┬───────────┬───────────────┐  │

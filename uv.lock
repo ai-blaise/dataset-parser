@@ -228,7 +228,7 @@ wheels = [
 ]
 
 [[package]]
-name = "data-gen"
+name = "dataset-parser"
 version = "0.1.0"
 source = { virtual = "." }
 dependencies = [

@@ -1,7 +1,7 @@
 [project]
-name = "data-gen"
+name = "dataset-parser"
 version = "0.1.0"
-description = "Add your description here"
+description = "A toolkit for exploring and transforming datasets containing AI conversation data"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [

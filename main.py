@@ -1,5 +1,5 @@
 def main():
-    print("Hello from data-gen!")
+    print("Hello from dataset-parser!")
 
 
 if __name__ == "__main__":
