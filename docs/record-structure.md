@@ -216,5 +216,5 @@ Typical records contain:
 Use `stats -v` to analyze role distribution in your dataset:
 
 ```bash
-uv run python scripts/main.py stats dataset/file.jsonl -v
+uv run python -m scripts.main stats dataset/file.jsonl -v
 ```

@@ -5,7 +5,7 @@ The Data Splitter (`scripts/data_splitter.py`) is a command-line tool for splitt
 ## Running the Tool
 
 ```bash
-python scripts/data_splitter.py <input_file> --parts N [options]
+uv run python -m scripts.data_splitter <input_file> --parts N [options]
 ```
 
 ## Arguments
@@ -65,7 +65,7 @@ The formula ensures the first `remainder` parts get one extra record.
 
 ```bash
 # Split into 4 parts
-python scripts/data_splitter.py dataset/tool_calling.jsonl -n 4
+uv run python -m scripts.data_splitter dataset/tool_calling.jsonl -n 4
 ```
 
 ### Dry Run (Preview)
@@ -73,7 +73,7 @@ python scripts/data_splitter.py dataset/tool_calling.jsonl -n 4
 Preview the split plan without creating files:
 
 ```bash
-python scripts/data_splitter.py dataset/tool_calling.jsonl -n 10 --dry-run
+uv run python -m scripts.data_splitter dataset/tool_calling.jsonl -n 10 --dry-run
 ```
 
 Output:
@@ -96,7 +96,7 @@ Total: 316,094 records
 ### Custom Output Directory
 
 ```bash
-python scripts/data_splitter.py dataset/tool_calling.jsonl -n 5 \
+uv run python -m scripts.data_splitter dataset/tool_calling.jsonl -n 5 \
     --output-dir ./splits/ \
     --prefix training_data
 ```
@@ -106,12 +106,12 @@ python scripts/data_splitter.py dataset/tool_calling.jsonl -n 5 \
 Split and verify that parts recombine correctly:
 
 ```bash
-python scripts/data_splitter.py dataset/interactive_agent.jsonl -n 4 --verify
+uv run python -m scripts.data_splitter dataset/interactive_agent.jsonl -n 4 --verify
 ```
 
 ## Recombination
 
-### Manual Recombination (Shell)
+### Manual Recombination (Shell) (and annoying will add this to cli commands later)
 
 ```bash
 # Recombine parts in order

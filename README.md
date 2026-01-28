@@ -60,10 +60,10 @@ uv run python -m scripts.parser_finale dataset/train.jsonl -O parsed_datasets/
 
 ```bash
 # Split into 4 parts
-python scripts/data_splitter.py dataset/conversations.jsonl -n 4
+uv run python -m scripts.data_splitter dataset/conversations.jsonl -n 4
 
 # Preview split without creating files
-python scripts/data_splitter.py dataset/conversations.jsonl -n 10 --dry-run
+uv run python -m scripts.data_splitter dataset/conversations.jsonl -n 10 --dry-run
 ```
 
 ## Usage
@@ -72,10 +72,10 @@ python scripts/data_splitter.py dataset/conversations.jsonl -n 10 --dry-run
 
 | Command | Description |
 |---------|-------------|
-| `list <file>` | Tabular summary of records |
-| `show <file> <index>` | View record or specific field |
-| `search <file> <query>` | Search text across records |
-| `stats <file>` | Dataset statistics |
+| `uv run python -m scripts.main list <file>` | Tabular summary of records |
+| `uv run python -m scripts.main show <file> <index>` | View record or specific field |
+| `uv run python -m scripts.main search <file> <query>` | Search text across records |
+| `uv run python -m scripts.main stats <file>` | Dataset statistics |
 
 ### TUI Keybindings
 

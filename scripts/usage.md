@@ -118,10 +118,10 @@ uv run python -m scripts.parser_finale dataset/interactive_agent.jsonl --compact
 
 | Command | Description | Example |
 |---------|-------------|---------|
-| `list` | Tabular summary of records | `uv run python scripts/main.py list dataset/file.jsonl -n 10` |
-| `show` | View record or specific field | `uv run python scripts/main.py show dataset/file.jsonl 0 -f messages[1]` |
-| `search` | Find text in records | `uv run python scripts/main.py search dataset/file.jsonl "query" -c` |
-| `stats` | Dataset statistics | `uv run python scripts/main.py stats dataset/file.jsonl -v` |
+| `list` | Tabular summary of records | `uv run python -m scripts.main list dataset/file.jsonl -n 10` |
+| `show` | View record or specific field | `uv run python -m scripts.main show dataset/file.jsonl 0 -f messages[1]` |
+| `search` | Find text in records | `uv run python -m scripts.main search dataset/file.jsonl "query" -c` |
+| `stats` | Dataset statistics | `uv run python -m scripts.main stats dataset/file.jsonl -v` |
 
 ### List Output Columns
 
@@ -159,14 +159,14 @@ uv run python -m scripts.parser_finale dataset/interactive_agent.jsonl --compact
 
 ```bash
 # List first 10 records
-uv run python scripts/main.py list dataset/interactive_agent.jsonl -n 10
+uv run python -m scripts.main list dataset/interactive_agent.jsonl -n 10
 
 # Show the second message of record 0
-uv run python scripts/main.py show dataset/interactive_agent.jsonl 0 -f messages[1]
+uv run python -m scripts.main show dataset/interactive_agent.jsonl 0 -f messages[1]
 
 # Search for "Bitcoin" with context
-uv run python scripts/main.py search dataset/interactive_agent.jsonl "Bitcoin" -c
+uv run python -m scripts.main search dataset/interactive_agent.jsonl "Bitcoin" -c
 
 # Get full statistics with tool breakdown
-uv run python scripts/main.py stats dataset/interactive_agent.jsonl -v
+uv run python -m scripts.main stats dataset/interactive_agent.jsonl -v
 ```

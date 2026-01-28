@@ -7,7 +7,7 @@ The CLI tool (`scripts/main.py`) provides commands for exploring and analyzing J
 All commands are run from the project root directory:
 
 ```bash
-uv run python scripts/main.py <command> [arguments] [options]
+uv run python -m scripts.main <command> [arguments] [options]
 ```
 
 ## Commands
@@ -17,17 +17,17 @@ uv run python scripts/main.py <command> [arguments] [options]
 Display a tabular summary of records in the dataset.
 
 ```bash
-uv run python scripts/main.py list <file> [options]
+uv run python -m scripts.main list <file> [options]
 ```
 
 #### Options
 
-| Option | Description |
-|--------|-------------|
-| `-n, --limit N` | Limit output to N records |
-| `--has-tools` | Filter to records with tool definitions |
-| `--has-reasoning` | Filter to records with reasoning enabled |
-| `--min-messages N` | Filter to records with at least N messages |
+```
+-n, --limit N        : limit output to N records
+--has-tools          : filter to records with tool definitions
+--has-reasoning      : filter to records with reasoning enabled
+--min-messages N     : filter to records with at least N messages
+```
 
 #### Output Columns
 
@@ -46,16 +46,16 @@ uv run python scripts/main.py list <file> [options]
 
 ```bash
 # List first 10 records
-uv run python scripts/main.py list dataset/conversations.jsonl -n 10
+uv run python -m scripts.main list dataset/conversations.jsonl -n 10
 
 # List records with tools
-uv run python scripts/main.py list dataset/conversations.jsonl --has-tools
+uv run python -m scripts.main list dataset/conversations.jsonl --has-tools
 
 # List records with at least 5 messages
-uv run python scripts/main.py list dataset/conversations.jsonl --min-messages 5
+uv run python -m scripts.main list dataset/conversations.jsonl --min-messages 5
 
 # Combine filters
-uv run python scripts/main.py list dataset/conversations.jsonl --has-tools --has-reasoning -n 20
+uv run python -m scripts.main list dataset/conversations.jsonl --has-tools --has-reasoning -n 20
 ```
 
 ---
@@ -65,7 +65,7 @@ uv run python scripts/main.py list dataset/conversations.jsonl --has-tools --has
 View a complete record or extract a specific field.
 
 ```bash
-uv run python scripts/main.py show <file> <index> [options]
+uv run python -m scripts.main show <file> <index> [options]
 ```
 
 #### Arguments
@@ -94,22 +94,22 @@ Access nested fields using dot notation and array indices:
 
 ```bash
 # Show complete record at index 0
-uv run python scripts/main.py show dataset/conversations.jsonl 0
+uv run python -m scripts.main show dataset/conversations.jsonl 0
 
 # Show only the messages array
-uv run python scripts/main.py show dataset/conversations.jsonl 0 -f messages
+uv run python -m scripts.main show dataset/conversations.jsonl 0 -f messages
 
 # Show the second message
-uv run python scripts/main.py show dataset/conversations.jsonl 0 -f messages[1]
+uv run python -m scripts.main show dataset/conversations.jsonl 0 -f messages[1]
 
 # Show content of the second message
-uv run python scripts/main.py show dataset/conversations.jsonl 0 -f messages[1].content
+uv run python -m scripts.main show dataset/conversations.jsonl 0 -f messages[1].content
 
 # Show the UUID
-uv run python scripts/main.py show dataset/conversations.jsonl 5 -f uuid
+uv run python -m scripts.main show dataset/conversations.jsonl 5 -f uuid
 
 # Show tool definitions
-uv run python scripts/main.py show dataset/conversations.jsonl 0 -f tools
+uv run python -m scripts.main show dataset/conversations.jsonl 0 -f tools
 ```
 
 ---
@@ -119,7 +119,7 @@ uv run python scripts/main.py show dataset/conversations.jsonl 0 -f tools
 Search for text across all records in the dataset.
 
 ```bash
-uv run python scripts/main.py search <file> <query> [options]
+uv run python -m scripts.main search <file> <query> [options]
 ```
 
 #### Arguments
@@ -141,19 +141,19 @@ uv run python scripts/main.py search <file> <query> [options]
 
 ```bash
 # Basic search
-uv run python scripts/main.py search dataset/conversations.jsonl "API"
+uv run python -m scripts.main search dataset/conversations.jsonl "API"
 
 # Search with context shown
-uv run python scripts/main.py search dataset/conversations.jsonl "error" -c
+uv run python -m scripts.main search dataset/conversations.jsonl "error" -c
 
 # Case-sensitive search
-uv run python scripts/main.py search dataset/conversations.jsonl "API" --case-sensitive
+uv run python -m scripts.main search dataset/conversations.jsonl "API" --case-sensitive
 
 # Limit results
-uv run python scripts/main.py search dataset/conversations.jsonl "function" -n 5
+uv run python -m scripts.main search dataset/conversations.jsonl "function" -n 5
 
 # Combined options
-uv run python scripts/main.py search dataset/conversations.jsonl "Bitcoin" -c -n 10
+uv run python -m scripts.main search dataset/conversations.jsonl "Bitcoin" -c -n 10
 ```
 
 ---
@@ -163,7 +163,7 @@ uv run python scripts/main.py search dataset/conversations.jsonl "Bitcoin" -c -n
 Display statistics about the dataset.
 
 ```bash
-uv run python scripts/main.py stats <file> [options]
+uv run python -m scripts.main stats <file> [options]
 ```
 
 #### Options
@@ -192,10 +192,10 @@ Verbose mode adds:
 
 ```bash
 # Basic statistics
-uv run python scripts/main.py stats dataset/conversations.jsonl
+uv run python -m scripts.main stats dataset/conversations.jsonl
 
 # Verbose statistics with tool breakdown
-uv run python scripts/main.py stats dataset/conversations.jsonl -v
+uv run python -m scripts.main stats dataset/conversations.jsonl -v
 ```
 
 ---
@@ -270,7 +270,7 @@ For large datasets, use limits to avoid overwhelming output:
 
 ```bash
 # Sample first 100 records
-uv run python scripts/main.py list dataset/large.jsonl -n 100
+uv run python -m scripts.main list dataset/large.jsonl -n 100
 ```
 
 ### Field Exploration
@@ -279,8 +279,8 @@ Use `show` to explore record structure before writing queries:
 
 ```bash
 # See full record structure
-uv run python scripts/main.py show dataset/file.jsonl 0
+uv run python -m scripts.main show dataset/file.jsonl 0
 
 # Then drill down
-uv run python scripts/main.py show dataset/file.jsonl 0 -f messages[0].role
+uv run python -m scripts.main show dataset/file.jsonl 0 -f messages[0].role
 ```
