@@ -119,14 +119,6 @@ dataset-parser/
 │ │   └── DiffIndicator           (generic JSON diff)               │
 │ └── DualRecordListScreen        (dataset vs dataset)              │
 │     └── Independent pane navigation                               │
-│                                                                   │
-├──────────────────────────────────────────────────────────────────┤
-│ Generality Assessment                                             │
-│                                                                   │
-│ ✓ General: Format loaders, JSON diff, JSON tree, dual-pane UI    │
-│ ⚠ Domain-specific: Schema detection, parser_finale, preview      │
-│                                                                   │
-│ See docs/generality.md for roadmap to general dataset comparison  │
 └──────────────────────────────────────────────────────────────────┘
 ```
 

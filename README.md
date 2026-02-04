@@ -105,51 +105,14 @@ uv run python -m scripts.data_splitter dataset/conversations.jsonl -n 10 --dry-r
 | `markdown` | Human-readable format |
 | `text` | Plain text summary |
 
-## Generality Status
+## Future Plans
 
-The tool is evolving from an AI conversation-specific tool toward a **general dataset comparer**.
+The tool is currently optimized for AI conversation datasets but is designed to become a **general-purpose dataset comparer**:
 
-### What's Already General
-
-| Component | Status | Notes |
-|-----------|--------|-------|
-| File Format Loading | General | Pluggable loader architecture (JSONL, JSON, Parquet) |
-| JSON Tree Display | General | Works with any JSON structure |
-| Diff Engine | General | Generic recursive JSON comparison |
-| Dual-Pane UI | General | Reusable for any side-by-side view |
-| Schema Caching | General | Solid infrastructure |
-
-### Current Domain-Specific Areas
-
-| Component | Limitation | Future Plan |
-|-----------|------------|-------------|
-| Schema Detection | Looks for `role/content` messages, `function/name` tools | Configurable field patterns |
-| Data Transformation | `parser_finale` empties assistant content | Pluggable transformation interface |
-| Record Preview | Extracts first "user" message | Configurable preview field |
-| Panel Labels | "Original Record" / "Parsed Output" hardcoded | Parameterized labels |
-| Record Matching | Index-only (UUID detection exists but unused) | ID-based matching with fallback |
-
-### Future Plans
-
-**Phase 1: Raw Comparison Mode**
-- Add `--raw` flag to skip transformation
-- Parameterize panel labels
-- Activate UUID-based record matching
-
-**Phase 2: Flexible Schema**
-- User-configurable preview field
-- Expandable ID field patterns
-- Configurable table columns
-
-**Phase 3: Smart Matching**
-- ID-based record matching across datasets
-- Handle different dataset sizes gracefully
-- Mismatch warnings and reporting
-
-**Phase 4: Format Expansion**
-- CSV loader
-- Excel/XLSX support
-- Additional export formats
+- **Configurable schema detection** - Support any JSON structure, not just conversations
+- **ID-based record matching** - Match records by key field instead of index
+- **Pluggable transformations** - Optional processing instead of hardcoded parser_finale
+- **Additional formats** - CSV, Excel/XLSX support
 
 ## Documentation
 
