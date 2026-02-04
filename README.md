@@ -1,13 +1,16 @@
 # dataset-parser
 
-An internal tool we built for exploring and transforming datasets containing AI conversation data. Provides CLI tools and an interactive TUI.
+A dataset exploration and comparison tool with an interactive TUI. Currently optimized for AI conversation datasets, with a vision to become a **general-purpose dataset comparer**.
 
 ## Features
-- **CLI Tool** - List, search, and analyze records from the command line
-- **Parser Finale** - Transform datasets by removing assistant responses
-- **TUI Application** - Interactive terminal interface for browsing datasets
-- **Data Splitter** - Split large JSONL datasets into N equal parts for parallel processing
-- **Multi-Format Support** - Load data from JSONL, JSON, and Parquet formats with automatic detection
+
+- **Interactive TUI** - Browse and compare datasets in a terminal interface
+- **Side-by-Side Comparison** - Compare two datasets or original vs. processed records
+- **Multi-Format Support** - Load JSONL, JSON, and Parquet with automatic detection
+- **Dynamic Schema Detection** - Automatically detects message, ID, and tool fields
+- **Diff Highlighting** - Visual comparison of changes between records
+- **CLI Tools** - List, search, and analyze records from the command line
+- **Data Splitter** - Split large datasets into N parts for parallel processing
 
 ## Requirements
 - Python 3.12+
@@ -101,6 +104,52 @@ uv run python -m scripts.data_splitter dataset/conversations.jsonl -n 10 --dry-r
 | `parquet` | Apache Parquet columnar format |
 | `markdown` | Human-readable format |
 | `text` | Plain text summary |
+
+## Generality Status
+
+The tool is evolving from an AI conversation-specific tool toward a **general dataset comparer**.
+
+### What's Already General
+
+| Component | Status | Notes |
+|-----------|--------|-------|
+| File Format Loading | General | Pluggable loader architecture (JSONL, JSON, Parquet) |
+| JSON Tree Display | General | Works with any JSON structure |
+| Diff Engine | General | Generic recursive JSON comparison |
+| Dual-Pane UI | General | Reusable for any side-by-side view |
+| Schema Caching | General | Solid infrastructure |
+
+### Current Domain-Specific Areas
+
+| Component | Limitation | Future Plan |
+|-----------|------------|-------------|
+| Schema Detection | Looks for `role/content` messages, `function/name` tools | Configurable field patterns |
+| Data Transformation | `parser_finale` empties assistant content | Pluggable transformation interface |
+| Record Preview | Extracts first "user" message | Configurable preview field |
+| Panel Labels | "Original Record" / "Parsed Output" hardcoded | Parameterized labels |
+| Record Matching | Index-only (UUID detection exists but unused) | ID-based matching with fallback |
+
+### Future Plans
+
+**Phase 1: Raw Comparison Mode**
+- Add `--raw` flag to skip transformation
+- Parameterize panel labels
+- Activate UUID-based record matching
+
+**Phase 2: Flexible Schema**
+- User-configurable preview field
+- Expandable ID field patterns
+- Configurable table columns
+
+**Phase 3: Smart Matching**
+- ID-based record matching across datasets
+- Handle different dataset sizes gracefully
+- Mismatch warnings and reporting
+
+**Phase 4: Format Expansion**
+- CSV loader
+- Excel/XLSX support
+- Additional export formats
 
 ## Documentation
 

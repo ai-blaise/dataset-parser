@@ -2,7 +2,10 @@
 
 ## Overview
 
-A comparison mode for the TUI enabling side-by-side comparison of two arbitrary datasets. Each pane navigates independently through: FILE_LIST → RECORD_LIST → JSON_VIEW.
+A comparison mode for the TUI enabling side-by-side comparison of two arbitrary datasets. Two modes:
+
+1. **Dual Record List** (`--compare`): Each pane navigates independently through: FILE_LIST → RECORD_LIST → JSON_VIEW
+2. **Comparison Screen** (single file): Shows original ↔ processed with diff highlighting and sync scrolling
 
 ## Usage
 
@@ -12,19 +15,26 @@ PYTHONPATH=. uv run python scripts/tui/app.py --compare test_comparison/dataset_
 
 # Short flag version
 PYTHONPATH=. uv run python scripts/tui/app.py -c dataset_a/ dataset_b/
+
+# Single file comparison (original vs processed with diffs)
+PYTHONPATH=. uv run python scripts/tui/app.py test_comparison/dataset_a/conversations.jsonl
 ```
 
 ## Key UX Principles
 
-1. **Independent panes**: Each pane navigates its own flow completely independently
+1. **Independent panes (Dual Record List)**: Each pane navigates its own flow completely independently
 2. **No reliance between panes**: Left can be at JSON_VIEW while right is still at FILE_LIST
 3. **Enter drills down**: Select file → load records, select record → show JSON
 4. **Escape goes back**: JSON_VIEW → RECORD_LIST → FILE_LIST → Exit
 5. **Tab switches focus**: Move between left and right panes
+6. **'d' toggles diffs** (ComparisonScreen only): Highlight differences between original/processed
+7. **'s' toggles sync scroll** (ComparisonScreen only): Scroll both panels together
 
 ## Keybindings
 
-All keybindings are centralized in `DualPaneMixin.PANE_BINDINGS`. Change them once to update all dual-pane screens.
+### Global Pane Bindings (DualPaneMixin)
+
+All pane-related keybindings are centralized in `DualPaneMixin.PANE_BINDINGS`. Change them once to update all dual-pane screens.
 
 | Key | Action | Description |
 |-----|--------|-------------|
@@ -39,6 +49,18 @@ All keybindings are centralized in `DualPaneMixin.PANE_BINDINGS`. Change them on
 | `q` | quit | Exit application |
 | `m` | show_field_detail | View field in modal (JSON view) |
 | `Enter` | (native) | Select item / drill down |
+
+### ComparisonScreen-Specific Bindings
+
+These bindings are only available in the ComparisonScreen (original ↔ processed view).
+
+| Key | Action | Description |
+|-----|--------|-------------|
+| `s` | toggle_sync | Toggle synchronized scrolling |
+| `d` | toggle_diff | Toggle diff highlighting |
+| `e` | expand_all | Expand all JSON tree nodes |
+| `c` | collapse_all | Collapse all JSON tree nodes |
+| `x` | export_record | Export current record |
 
 ## Navigation Flow
 
@@ -139,10 +161,11 @@ def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
 |------|---------|
 | `scripts/tui/mixins/dual_pane.py` | **Centralized bindings & panel logic** |
 | `scripts/tui/mixins/vim_navigation.py` | Vim j/k/h/l/g/G navigation |
-| `scripts/tui/views/dual_record_list_screen.py` | Main comparison screen |
-| `scripts/tui/views/comparison_screen.py` | Original ↔ Parsed screen (also uses mixins) |
+| `scripts/tui/views/dual_record_list_screen.py` | Main comparison screen (independent pane navigation) |
+| `scripts/tui/views/comparison_screen.py` | Original ↔ Parsed screen (diff highlighting, sync scroll) |
 | `scripts/tui/styles/base.tcss` | Shared CSS styles |
 | `scripts/tui/app.py` | App entry point |
+| `scripts/tui/widgets/diff_indicator.py` | Diff calculation logic |
 
 ## Customizing Keybindings
 
@@ -162,9 +185,29 @@ PANE_BINDINGS = [
 
 ## Scope
 
-This feature provides **independent pane navigation only**. Each pane can browse files, records, and view JSON independently.
+### What IS Implemented
 
-No diff highlighting or sync scrolling - just simple side-by-side browsing.
+| Feature | Status | Notes |
+|---------|--------|-------|
+| Independent pane navigation | ✓ | Each pane navigates independently |
+| FILE_LIST → RECORD_LIST → JSON_VIEW flow | ✓ | Per pane |
+| Tab switching | ✓ | Move between left/right panels |
+| Vim navigation (j/k/h/l) | ✓ | Within active panel |
+| Diff highlighting | ✓ | Press `d` to toggle |
+| Sync scrolling | ✓ | Press `s` to toggle |
+| Field detail modal | ✓ | Press `m` to view field details |
+| Raw mode for unknown schemas | ✓ | Shows original on both sides |
+
+### Future Plans
+
+| Feature | Priority | Notes |
+|---------|----------|-------|
+| Synced record selection | Medium | Currently records selected independently |
+| Diff summary | Low | Would show diff counts/statistics |
+| Cross-pane search | Medium | Unified search across both panes |
+| Export comparison | Low | Export side-by-side comparison results |
+| ID-based record matching | High | Match by UUID instead of index |
+| Configurable panel labels | Medium | Remove hardcoded "Original"/"Parsed" |
 
 ## Test Data Files
 

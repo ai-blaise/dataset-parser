@@ -1,6 +1,6 @@
 # TUI Application Guide
 
-The TUI provides an interactive way to browse and analyze datasets containing AI conversation data. It supports multiple file formats including JSONL, JSON, and Parquet.
+The TUI provides an interactive way to browse and compare datasets. Currently optimized for AI conversation data, with dynamic schema detection for varying field structures. Supports JSONL, JSON, and Parquet formats.
 
 ## Supported File Formats
 
@@ -12,12 +12,27 @@ The TUI provides an interactive way to browse and analyze datasets containing AI
 
 The TUI automatically detects the file format from the extension. The title bar displays the detected format (e.g., "Dataset Viewer - data.parquet (parquet)").
 
-### Schema Normalization (still needs some work)
-Different formats may use different field names. The TUI normalizes all records to a standard schema:
+### Dynamic Schema Detection
 
-- Parquet files using `conversations` are converted to `messages`
+The TUI automatically detects field mappings from your data:
+
+**ID Field Detection** (priority order):
+1. Known field names: `uuid`, `id`, `uid`, `example_id`, `trial_name`, `chat_id`, `conversation_id`
+2. Values matching UUID format (8-4-4-4-12 hex pattern)
+
+**Message Field Detection**:
+- Looks for arrays containing objects with `role` or `content` keys
+- If multiple candidates, selects the largest array
+
+**Tool Field Detection**:
+- Looks for arrays containing objects with `function` or `name` keys
+
+**Schema Normalization**:
+- Parquet `conversations` field is converted to `messages`
 - Parquet `trial_name` is used as `uuid` fallback
 - Missing standard fields are assigned defaults
+
+**Raw Mode**: If no message field is detected, the TUI falls back to "raw mode" showing the original data without transformation.
 
 ## Running the TUI
 
@@ -495,3 +510,19 @@ Records are displayed as collapsible trees:
 - Arrays show their indices
 - Primitives show their values
 - Nested structures are indented
+
+## Current Limitations
+
+The TUI is currently optimized for AI conversation datasets. Some limitations for general use:
+
+| Area | Current Behavior | Future Plan |
+|------|------------------|-------------|
+| Schema Detection | Looks for `role/content` messages | Configurable field patterns |
+| Record Preview | Shows first "user" message | Configurable preview field |
+| Panel Labels | "Original Record" / "Parsed Output" | Parameterized labels |
+| Record Matching | Index-based only | ID-based matching with fallback |
+| Transformation | Always applies parser_finale | Optional/pluggable transformation |
+
+**Raw Mode Fallback**: If the TUI cannot detect a standard message field, it enters "raw mode" showing the original data on both panels without transformation.
+
+For detailed analysis of generality and the roadmap to support any dataset type, see [Generality Analysis](generality.md).

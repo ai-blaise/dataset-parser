@@ -1,15 +1,23 @@
 # Architecture Overview
 
-This document describes the architecture of the dataset-parser JSONL dataset exploration tool.
+This document describes the architecture of the dataset-parser tool.
 
 ## System Overview
 
-dataset-parser is a modular toolkit for exploring and transforming JSONL datasets containing AI conversation data. It provides three main interfaces:
+dataset-parser is a modular toolkit for exploring and comparing datasets. Currently optimized for AI conversation data, with architecture designed for future generalization to any dataset type.
 
-1. **CLI Tool** - Command-line interface for dataset exploration
-2. **Parser Finale** - Core transformation engine for processing records
-3. **TUI Application** - Interactive terminal UI for browsing datasets
-4. **Data Splitter** - Utility for splitting JSONL files into N parts
+**Core interfaces:**
+
+1. **TUI Application** - Interactive terminal UI for browsing and comparing datasets
+2. **CLI Tool** - Command-line interface for dataset exploration
+3. **Parser Finale** - Transformation engine for processing records (AI-specific)
+4. **Data Splitter** - Utility for splitting files into N parts
+
+**Key architectural strengths:**
+- Pluggable format loaders (JSONL, JSON, Parquet)
+- Generic JSON diff engine
+- Schema-aware field detection
+- Mixin-based UI composition
 
 ## Directory Structure
 
@@ -24,27 +32,45 @@ dataset-parser/
 │
 ├── scripts/                   # Main application code
 │   ├── main.py                # CLI tool implementation
-│   ├── parser_finale.py       # Core JSONL processor
+│   ├── parser_finale.py       # Core record processor (AI-specific)
 │   ├── data_splitter.py       # Dataset splitting utility
+│   ├── data_formats/          # Multi-format data loaders
+│   │   ├── base.py            # Abstract DataLoader class
+│   │   ├── jsonl_loader.py    # JSONL format
+│   │   ├── json_loader.py     # JSON format
+│   │   ├── parquet_loader.py  # Parquet format
+│   │   ├── format_detector.py # Auto-detection
+│   │   ├── schema_normalizer.py
+│   │   └── directory_loader.py
 │   └── tui/                   # Terminal UI application
-│       ├── __init__.py
 │       ├── app.py             # Main Textual app
-│       ├── data_loader.py     # JSONL loading utilities
+│       ├── data_loader.py     # Data loading with schema detection
+│       ├── mixins/            # Reusable behavior mixins
+│       │   ├── data_table.py      # DataTable utilities
+│       │   ├── record_table.py    # Schema-aware record tables
+│       │   ├── dual_pane.py       # Dual-pane management
+│       │   ├── vim_navigation.py  # j/k/h/l navigation
+│       │   ├── export.py          # Export functionality
+│       │   └── background_task.py # Async loading
 │       ├── views/             # Screen components
+│       │   ├── file_list.py
 │       │   ├── record_list.py
-│       │   └── comparison_screen.py
-│       └── widgets/           # Reusable UI components
-│           ├── json_tree_panel.py
-│           ├── diff_indicator.py
-│           └── field_detail_modal.py
+│       │   ├── comparison_screen.py
+│       │   └── dual_record_list_screen.py
+│       ├── widgets/           # Reusable UI components
+│       │   ├── json_tree_panel.py
+│       │   ├── diff_indicator.py
+│       │   └── field_detail_modal.py
+│       ├── screens/           # Modal screens
+│       │   ├── loading_screen.py
+│       │   └── exporting_screen.py
+│       └── styles/            # CSS styles
+│           └── base.tcss
 │
 ├── tests/                     # Test suite
 │   ├── conftest.py            # Pytest fixtures
 │   ├── test_*.py              # Test modules
 │   └── fixtures/              # Test data
-│       ├── valid/
-│       ├── edge_cases/
-│       └── invalid/
 │
 └── docs/                      # Documentation
 ```
@@ -52,43 +78,56 @@ dataset-parser/
 ## Component Architecture
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│               dataset-parser Application                │
-├─────────────────────────────────────────────────────────┤
-│                                                         │
-│  ┌───────────────┬─────────────────┬───────────┬───────────────┐  │
-│  │   CLI Tool    │  Parser Finale  │   TUI     │ Data Splitter │  │
-│  │  (main.py)    │(parser_finale)  │  (app.py) │(data_splitter)│  │
-│  └───────┬───────┴────────┬────────┴─────┬─────┴───────────────┘  │
-│           │                   │                │        │
-│           └───────────────────┼────────────────┘        │
-│                               │                         │
-│                    ┌──────────▼─────────┐               │
-│                    │    Data Loader     │               │
-│                    │  (data_loader.py)  │               │
-│                    │                    │               │
-│                    │  - load_jsonl()    │               │
-│                    │  - process_record()│               │
-│                    │  - get_summary()   │               │
-│                    └──────────┬─────────┘               │
-│                               │                         │
-│                    ┌──────────▼─────────┐               │
-│                    │   JSONL Records    │               │
-│                    │  (Dataset files)   │               │
-│                    └────────────────────┘               │
-│                                                         │
-├─────────────────────────────────────────────────────────┤
-│ TUI Component Hierarchy (Textual Framework)             │
-│                                                         │
-│ JsonComparisonApp                                       │
-│ ├── RecordListScreen                                    │
-│ │   └── DataTable (record summaries)                    │
-│ └── ComparisonScreen                                    │
-│     ├── JsonTreePanel (original record)                 │
-│     ├── JsonTreePanel (processed record)                │
-│     ├── FieldDetailModal (detail view)                  │
-│     └── DiffIndicator (highlighting)                    │
-└─────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────┐
+│                    dataset-parser Application                     │
+├──────────────────────────────────────────────────────────────────┤
+│                                                                   │
+│  ┌─────────────┬──────────────┬─────────────┬──────────────────┐ │
+│  │  CLI Tool   │Parser Finale │    TUI      │  Data Splitter   │ │
+│  │ (main.py)   │(AI-specific) │  (app.py)   │ (data_splitter)  │ │
+│  └──────┬──────┴──────┬───────┴──────┬──────┴──────────────────┘ │
+│         │             │              │                            │
+│         └─────────────┼──────────────┘                            │
+│                       │                                           │
+│            ┌──────────▼──────────┐                                │
+│            │     Data Loader     │   ← Schema Detection           │
+│            │   (data_loader.py)  │   ← Field Mapping              │
+│            │                     │   ← Record Caching             │
+│            └──────────┬──────────┘                                │
+│                       │                                           │
+│            ┌──────────▼──────────┐                                │
+│            │   Format Loaders    │   ← Pluggable Architecture     │
+│            │  (data_formats/)    │                                │
+│            │  ├── JSONL          │                                │
+│            │  ├── JSON           │                                │
+│            │  └── Parquet        │                                │
+│            └──────────┬──────────┘                                │
+│                       │                                           │
+│            ┌──────────▼──────────┐                                │
+│            │   Dataset Files     │                                │
+│            └────────────────────┘                                │
+│                                                                   │
+├──────────────────────────────────────────────────────────────────┤
+│ TUI Component Hierarchy (Textual Framework)                       │
+│                                                                   │
+│ JsonComparisonApp                                                 │
+│ ├── FileListScreen              (directory browsing)              │
+│ ├── RecordListScreen            (record table with schema detect) │
+│ │   └── RecordTableMixin → DataTableMixin                         │
+│ ├── ComparisonScreen            (original vs processed)           │
+│ │   ├── JsonTreePanel           (generic JSON display)            │
+│ │   └── DiffIndicator           (generic JSON diff)               │
+│ └── DualRecordListScreen        (dataset vs dataset)              │
+│     └── Independent pane navigation                               │
+│                                                                   │
+├──────────────────────────────────────────────────────────────────┤
+│ Generality Assessment                                             │
+│                                                                   │
+│ ✓ General: Format loaders, JSON diff, JSON tree, dual-pane UI    │
+│ ⚠ Domain-specific: Schema detection, parser_finale, preview      │
+│                                                                   │
+│ See docs/generality.md for roadmap to general dataset comparison  │
+└──────────────────────────────────────────────────────────────────┘
 ```
 
 ## Core Components
@@ -140,16 +179,22 @@ See [Data Splitter Documentation](data-splitter.md) for detailed usage.
 
 ### Data Loader (`scripts/tui/data_loader.py`)
 
-Shared utilities for loading and processing JSONL data:
+Shared utilities for loading and processing data with dynamic schema detection:
 
 | Function | Purpose |
 |----------|---------|
-| `load_jsonl()` | Lazy generator for memory-efficient loading |
-| `load_all_records()` | Load full file into memory |
-| `get_record_summary()` | Extract metadata for display |
+| `detect_messages_field()` | Find array with message-like objects |
+| `detect_uuid_field()` | Find ID field by name or UUID pattern |
+| `detect_tools_field()` | Find array with tool definitions |
+| `detect_schema()` | Detect full schema mapping for a record |
+| `get_field_mapping()` | Get cached schema for a file |
+| `load_records()` | Lazy generator supporting all formats |
+| `load_all_records()` | Load full file with schema detection |
+| `get_record_summary()` | Extract metadata using schema mapping |
 | `load_record_pair()` | Return (original, processed) tuple |
-| `truncate()` | Helper for display truncation |
-| `get_record_diff()` | Calculate differences between records |
+| `load_record_pair_comparison()` | Load matching records from two files |
+
+**Schema Detection**: The loader automatically detects field mappings on first record load, caching the schema per-file. This enables dynamic column generation based on actual data structure.
 
 ## Design Principles
 

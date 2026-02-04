@@ -121,23 +121,31 @@ class ComparisonScreen(VimNavigationMixin, DualPaneMixin, Screen):
 
 ---
 
-## Phase 3: Extract DataTableMixin ⏸️ DEFERRED
+## Phase 3: Extract DataTableMixin ✓ COMPLETED
 
-**Status**: Not implemented (low priority)
+**Status**: Implemented
 
-### Rationale
+### Implementation
 
-The DataTable setup code is relatively simple and the duplication is minimal. The benefit doesn't justify the added complexity.
+`DataTableMixin` was extracted to `scripts/tui/mixins/data_table.py` with methods:
+- `_configure_table()` - Apply configuration to a DataTable
+- `_setup_table()` - Set up table with columns and settings
+- `_should_skip_table()` - Check if table should be skipped for single records
+- `_get_record_id_display()` - Get display string for record ID
+- `_get_selected_row_key()` - Extract row key from selection events
+- `_get_clicked_row_key()` - Extract row key from click events
+
+`RecordTableMixin` now inherits from `DataTableMixin` for schema-aware record tables.
 
 ---
 
 ## Phase 4: Extract ExportMixin ⏸️ DEFERRED
 
-**Status**: Not implemented (low priority)
+**Status**: Future plan (low priority)
 
 ### Rationale
 
-Export functionality is screen-specific enough that a mixin would add complexity without significant benefit.
+Export functionality is screen-specific enough that a mixin would add complexity without significant benefit. May revisit if export features expand.
 
 ---
 
