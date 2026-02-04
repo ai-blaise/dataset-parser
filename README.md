@@ -8,7 +8,7 @@ A dataset exploration and comparison tool with an interactive TUI. Currently opt
 - **Side-by-Side Comparison** - Compare two datasets or original vs. processed records
 - **Multi-Format Support** - Load JSONL, JSON, and Parquet with automatic detection
 - **Dynamic Schema Detection** - Automatically detects message, ID, and tool fields
-- **Diff Highlighting** - Visual comparison of changes between records
+
 - **CLI Tools** - List, search, and analyze records from the command line
 - **Data Splitter** - Split large datasets into N parts for parallel processing
 
@@ -90,8 +90,7 @@ uv run python -m scripts.data_splitter dataset/conversations.jsonl -n 10 --dry-r
 | `P` | Export all files in directory (File List) |
 | `X` | Export all records in file (Record List) |
 | `x` | Export current record (Comparison) |
-| `s` | Toggle synchronized scrolling |
-| `d` | Toggle diff highlighting |
+
 | `q` | Quit |
 | Arrow keys | Navigate |
 

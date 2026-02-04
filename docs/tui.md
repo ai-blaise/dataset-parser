@@ -65,8 +65,6 @@ Use `h/l` or `Tab` to switch between panes. Each pane navigates independently.
 
 ### Features
 
-- **Diff highlighting**: Press `d` to highlight differences between records
-- **Sync scrolling**: Press `s` to scroll both panes together
 - **JSON tree view**: Expand/collapse nested structures
 
 ## Keybindings
@@ -81,16 +79,6 @@ Use `h/l` or `Tab` to switch between panes. Each pane navigates independently.
 | `Enter` | Select item / Expand node |
 | `ESC` or `b` | Go back |
 | `q` | Quit |
-
-### Comparison View
-
-| Key | Action |
-|-----|--------|
-| `d` | Toggle diff highlighting |
-| `s` | Toggle sync scroll |
-| `e` | Expand all nodes |
-| `c` | Collapse all nodes |
-| `x` | Export current record |
 
 ### Export
 
