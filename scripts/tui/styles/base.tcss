@@ -1,0 +1,198 @@
+/* Base styles for all TUI screens */
+
+/* ==========================================================================
+   Global element styling
+   ========================================================================== */
+
+Screen {
+    background: $surface;
+}
+
+Header {
+    dock: top;
+    height: 3;
+    background: $primary;
+    color: $text;
+}
+
+Footer {
+    dock: bottom;
+    height: 1;
+    background: $primary-darken-2;
+}
+
+Static {
+    width: 100%;
+}
+
+Tree {
+    background: $surface;
+    padding: 1;
+}
+
+Tree > .tree--cursor {
+    background: $secondary;
+}
+
+Tree > .tree--guides {
+    color: $text-muted;
+}
+
+/* ==========================================================================
+   DataTable styling (shared across all screens with tables)
+   ========================================================================== */
+
+DataTable {
+    height: 100%;
+    background: $surface;
+}
+
+DataTable > .datatable--header {
+    background: $primary-darken-1;
+    color: $text;
+    text-style: bold;
+}
+
+DataTable > .datatable--cursor {
+    background: $secondary;
+    color: $text;
+}
+
+DataTable > .datatable--hover {
+    background: $primary-lighten-1;
+}
+
+/* ==========================================================================
+   Dual pane panel styling (for screens with #left-panel and #right-panel)
+   ========================================================================== */
+
+/* Base panel styling */
+#left-panel, #right-panel {
+    width: 50%;
+    border: solid $surface-darken-2;
+}
+
+/* Active panels - highlighted border */
+#left-panel.active {
+    border: wide $warning;
+}
+
+#right-panel.active {
+    border: wide $warning;
+}
+
+/* Inactive panels - muted border */
+#left-panel.inactive {
+    border: solid $surface-darken-2;
+}
+
+#right-panel.inactive {
+    border: solid $surface-darken-2;
+}
+
+/* Panel headers */
+.panel-header {
+    height: 3;
+    width: 100%;
+    background: $surface-darken-1;
+    border-bottom: solid $surface-darken-2;
+    text-align: center;
+    text-style: bold;
+    padding: 1;
+    content-align: center middle;
+    color: $text-muted;
+}
+
+/* Active panel headers */
+#left-panel.active .panel-header {
+    background: $primary;
+    color: $text;
+    text-style: bold;
+    border-bottom: wide $warning;
+}
+
+#right-panel.active .panel-header {
+    background: $success;
+    color: $text;
+    text-style: bold;
+    border-bottom: wide $warning;
+}
+
+/* Inactive panel headers */
+#left-panel.inactive .panel-header {
+    background: $primary-darken-2;
+    color: $text-muted;
+}
+
+#right-panel.inactive .panel-header {
+    background: $success-darken-2;
+    color: $text-muted;
+}
+
+/* Tree panels within panes */
+#left-tree, #right-tree {
+    height: 1fr;
+}
+
+/* ==========================================================================
+   Diff highlighting (for comparison screens)
+   ========================================================================== */
+
+.diff-added {
+    background: $success 20%;
+}
+
+.diff-removed {
+    background: $error 20%;
+}
+
+.diff-changed {
+    background: $warning 20%;
+}
+
+.diff-unchanged {
+    /* Default styling, no change */
+}
+
+/* ==========================================================================
+   Progress screens (loading, exporting, processing)
+   ========================================================================== */
+
+ProgressScreen, LoadingScreen, ExportingScreen {
+    align: center middle;
+}
+
+.progress-container {
+    width: 60;
+    height: 12;
+    border: solid $primary;
+    padding: 1 2;
+}
+
+.progress-title {
+    text-align: center;
+    text-style: bold;
+    margin-bottom: 1;
+}
+
+.progress-status {
+    text-align: center;
+    margin-bottom: 1;
+}
+
+.progress-detail {
+    text-align: center;
+    color: $text-muted;
+}
+
+/* Loading screen - shorter height */
+#loading-container {
+    height: 10;
+    border: solid $primary;
+}
+
+/* Exporting screen - success color border */
+#exporting-container {
+    height: 12;
+    border: solid $success;
+}

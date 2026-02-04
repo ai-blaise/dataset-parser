@@ -32,6 +32,7 @@ The TUI accepts either a single file or a directory containing data files.
 | Option | Description |
 |--------|-------------|
 | `-O, --output-dir` | Output directory for export operations (default: parsed_datasets) |
+| `-c, --compare` | Path to second dataset for side-by-side comparison |
 
 ### Single File Mode
 
@@ -63,6 +64,29 @@ In directory mode:
 - Press `ESC` or `b` from the Record List to return to the file picker
 - File sizes are displayed for easy identification
 
+### Dataset Comparison Mode
+
+Compare two datasets side-by-side without parser_finale transformation:
+
+```bash
+# Compare two individual files
+uv run python -m scripts.tui.app dataset/train_v1.jsonl --compare dataset/train_v2.jsonl
+
+# Compare two directories (file picker for each side)
+uv run python -m scripts.tui.app dataset_a/ --compare dataset_b/
+
+# Compare Parquet files
+uv run python -m scripts.tui.app data/train-v1.parquet --compare data/train-v2.parquet
+```
+
+In comparison mode:
+- **Single files**: Both files load directly, showing Dataset Comparison Screen
+- **Directories**: File picker appears for each side, select files then press `ESC` to compare
+
+**Record Matching:**
+- Records are matched by UUID if both datasets have matching UUIDs
+- Falls back to index-based matching if UUIDs differ or are missing
+
 ## Keybindings
 
 ### Global
@@ -71,20 +95,49 @@ In directory mode:
 |-----|--------|
 | `q` | Quit application |
 
+### Global Vim Navigation
+
+All screens support vim-style navigation keybindings:
+
+| Key | Action |
+|-----|--------|
+| `j` | Move cursor down (same as `↓`) |
+| `k` | Move cursor up (same as `↑`) |
+| `h` | Focus left panel (in dual-pane screens) |
+| `l` | Focus right panel (in dual-pane screens) |
+| `g` | Jump to first item |
+| `G` | Jump to last item |
+
+These work across all screens with DataTable, ListView, and Tree widgets.
+
 ### File List Screen (Directory Mode)
 
 | Key | Action |
 |-----|--------|
-| `↑/↓` | Navigate files |
+| `↑/↓` or `j/k` | Navigate files |
+| `g` | Jump to first file |
+| `G` | Jump to last file |
 | `Enter` | Open selected file |
 | `P` | Export all files (processed) to output directory |
 | `ESC` | Quit application |
+
+### Comparison Select Screen (Directory Comparison Mode)
+
+| Key | Action |
+|-----|--------|
+| `↑/↓` or `j/k` | Navigate files |
+| `Tab` or `h/l` | Switch between left/right columns |
+| `Enter` | Toggle file selection in active column |
+| `ESC` | Confirm selection and proceed to comparison |
+| `q` | Quit application |
 
 ### Record List Screen
 
 | Key | Action |
 |-----|--------|
-| `↑/↓` | Navigate records |
+| `↑/↓` or `j/k` | Navigate records |
+| `g` | Jump to first record |
+| `G` | Jump to last record |
 | `Enter` | Open comparison view |
 | `ESC` / `b` | Back to file list (directory mode) or quit |
 | `X` | Export all records (processed) to output directory |
@@ -95,14 +148,50 @@ In directory mode:
 |-----|--------|
 | `ESC` / `b` | Back to record list |
 | `Tab` | Switch panel focus |
-| `←` | Focus left panel |
-| `→` | Focus right panel |
+| `←` or `h` | Focus left panel |
+| `→` or `l` | Focus right panel |
+| `j/k` | Navigate tree nodes (same as `↓/↑`) |
 | `s` | Toggle sync scroll |
 | `d` | Toggle diff highlighting |
 | `m` | Show field detail modal |
 | `e` | Expand all nodes |
 | `c` | Collapse all nodes |
 | `x` | Export current record (processed) to output directory |
+| `↑/↓` | Navigate tree nodes |
+| `Enter` | Expand/collapse node |
+
+### Split Comparison Screen
+
+| Key | Action |
+|-----|--------|
+| `ESC` | Go back one level in active pane |
+| `Tab` | Switch pane focus |
+| `h` | Focus left pane |
+| `l` | Focus right pane |
+| `j/k` | Navigate current widget (files/records/tree) |
+| `s` | Toggle sync scroll (when both panes at JSON view) |
+| `d` | Toggle diff highlighting (when both panes at JSON view) |
+| `q` | Quit application |
+
+### Dataset Comparison Screen
+
+Note: In this screen, `j/k` are used for record navigation instead of cursor navigation.
+
+| Key | Action |
+|-----|--------|
+| `ESC` / `b` | Back to file selection |
+| `Tab` | Switch panel focus |
+| `←` or `h` | Focus left panel |
+| `→` or `l` | Focus right panel |
+| `n/p` | Next/previous record in left panel |
+| `N/P` | First/last record in left panel |
+| `j/k` | Next/previous record in right panel |
+| `J/K` | First/last record in right panel |
+| `s` | Toggle sync scroll |
+| `d` | Toggle diff highlighting |
+| `m` | Show field detail modal |
+| `e` | Expand all nodes |
+| `c` | Collapse all nodes |
 | `↑/↓` | Navigate tree nodes |
 | `Enter` | Expand/collapse node |
 
@@ -131,6 +220,25 @@ When you open a directory, the File List Screen displays all supported data file
 - Press `Enter` to open the selected file
 - Press `ESC` or `q` to quit
 
+### Comparison Select Screen (Directory Comparison Mode)
+
+When comparing two directories, a two-column file picker appears:
+
+| Column | Description |
+|--------|-------------|
+| FILE NAME | Name of the data file |
+| FORMAT | File format (JSONL, JSON, PARQUET) |
+| SIZE | File size (B, KB, MB, GB) |
+
+**Navigation:**
+
+- Left column: Left dataset files
+- Right column: Right dataset files
+- `Tab` switches between columns
+- `Enter` toggles file selection
+- `ESC` confirms selection and proceeds to comparison
+- Selected files are highlighted in the secondary color
+
 ### Record List Screen
 
 The main screen displays all records in a table format:
@@ -148,7 +256,7 @@ The main screen displays all records in a table format:
 
 **Navigation:**
 
-- Use arrow keys to move between cells (will add vim keybindings very soon ;))
+- Use arrow keys or vim keys (`j/k`) to navigate records
 - Press `Enter` to view full record details
 - Press `m` to see detailed information for the current cell
 
@@ -164,6 +272,23 @@ Features:
 - **Synchronized scrolling**: Both panels scroll together (toggle with `s`)
 - **Synchronized expansion**: Expanding/collapsing nodes mirrors to other panel
 - **Diff highlighting**: Shows changes between original and processed (toggle with `d`)
+- **Hierarchical JSON tree**: Collapsible tree view of nested data
+- **Field detail modal**: View full untruncated content (press `m`)
+
+### Dataset Comparison Screen
+
+When comparing two datasets (using `--compare`), you see a side-by-side comparison of records from both datasets:
+
+- **Left panel**: Dataset A (blue header showing filename)
+- **Right panel**: Dataset B (green header showing filename)
+
+Features:
+
+- **No parsing**: Records are displayed as-is from both datasets
+- **UUID matching**: Records are matched by UUID if available, with index fallback
+- **Synchronized scrolling**: Both panels scroll together (toggle with `s`)
+- **Synchronized expansion**: Expanding/collapsing nodes mirrors to other panel
+- **Diff highlighting**: Shows differences between the two datasets (toggle with `d`)
 - **Hierarchical JSON tree**: Collapsible tree view of nested data
 - **Field detail modal**: View full untruncated content (press `m`)
 
@@ -204,6 +329,36 @@ Press `m` on any cell to see detailed information:
 2. Compare original (left) vs processed (right) panels
 3. Look for diff highlighting to identify changes
 4. Press `ESC` to return to the list
+
+### Comparing Two Datasets
+
+1. Launch the TUI with the `--compare` flag:
+   ```bash
+   uv run python -m scripts.tui.app dataset_v1.jsonl --compare dataset_v2.jsonl
+   ```
+
+2. Both datasets load side-by-side in the Dataset Comparison Screen
+
+3. Records are matched by UUID (if present) or by index
+
+4. Use `d` to toggle diff highlighting and see differences between datasets
+
+5. Press `ESC` to exit comparison mode
+
+### Comparing Two Directories
+
+1. Launch with two directory paths:
+   ```bash
+   uv run python -m scripts.tui.app dataset_a/ --compare dataset_b/
+   ```
+
+2. A two-column file picker appears
+
+3. Use `↑/↓` to navigate, `Tab` to switch columns
+
+4. Press `Enter` to select a file from each column
+
+5. Press `ESC` to confirm and view the comparison
 
 ### Inspecting Tools
 
@@ -284,6 +439,7 @@ Records are cached after the first load to improve navigation performance:
 - Moving between Record List and Comparison Screen doesn't reload the file
 - Cache is per-file and session-scoped
 - Large files benefit significantly from caching
+- In comparison mode, both datasets are cached separately
 
 ### Memory Safety
 
@@ -321,6 +477,15 @@ In the comparison view, changes are highlighted:
 - **Changed content**: Assistant `content` fields (emptied in processed)
 - **Removed content**: `reasoning_content` fields (dropped in processed)
 - **Unchanged content**: All other fields (system, user, tool messages, tool_calls)
+
+**Dataset Comparison Mode:**
+
+When comparing two datasets (not original vs processed), diff highlighting shows:
+
+- **Added content**: Fields/values in right dataset not in left
+- **Removed content**: Fields/values in left dataset not in right
+- **Changed content**: Same fields with different values
+- **Unchanged content**: Identical fields and values
 
 ### JSON Tree
 

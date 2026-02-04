@@ -1,5 +1,7 @@
 .beads
 .claude
+.opencode
+.ruff_cache
 
 ./dataset/
 nemotron/

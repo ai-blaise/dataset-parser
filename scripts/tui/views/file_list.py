@@ -17,9 +17,10 @@ from textual.widgets import DataTable, Footer, Header, Static
 from scripts.data_formats import format_file_size
 from scripts.parser_finale import process_record
 from scripts.tui.data_loader import export_records, load_all_records
+from scripts.tui.mixins import DataTableMixin, ExportMixin, VimNavigationMixin
 
 
-class FileListScreen(Screen):
+class FileListScreen(ExportMixin, DataTableMixin, VimNavigationMixin, Screen):
     """Screen for selecting a file from a directory."""
 
     CSS = """
@@ -40,21 +41,6 @@ class FileListScreen(Screen):
         border: solid $primary;
     }
 
-    #file-table > .datatable--header {
-        background: $primary;
-        color: $text;
-        text-style: bold;
-    }
-
-    #file-table > .datatable--cursor {
-        background: $secondary;
-        color: $text;
-    }
-
-    #file-table > .datatable--hover {
-        background: $primary-darken-2;
-    }
-
     Header {
         dock: top;
     }
@@ -64,7 +50,7 @@ class FileListScreen(Screen):
     }
     """
 
-    BINDINGS = [
+    BINDINGS = VimNavigationMixin.VIM_BINDINGS + [
         Binding("q", "quit", "Quit", show=False),
         Binding("escape", "quit", "Quit", show=True),
         Binding("P", "export_all_files", "Export All Files"),
@@ -99,14 +85,15 @@ class FileListScreen(Screen):
     def on_mount(self) -> None:
         """Configure the table when screen is mounted."""
         self.title = "JSON Comparison Viewer - Select File"
-        table = self.query_one("#file-table", DataTable)
-        table.cursor_type = "row"
-        table.zebra_stripes = True
 
-        # Add columns
-        table.add_column("FILE NAME", width=50)
-        table.add_column("FORMAT", width=10)
-        table.add_column("SIZE", width=12)
+        table = self._setup_table(
+            "file-table",
+            [
+                ("FILE NAME", 50),
+                ("FORMAT", 10),
+                ("SIZE", 12),
+            ],
+        )
 
         # Add rows
         for file_info in self._files:
@@ -142,10 +129,7 @@ class FileListScreen(Screen):
     @work(thread=True)
     def _run_export_all_files(self, exporting_screen: "ExportingScreen") -> None:
         """Run the export in a background thread."""
-        output_dir = getattr(self.app, "_output_dir", None)
-        if not output_dir:
-            output_dir = "parsed_datasets"
-
+        output_dir = self._get_output_dir()
         exported_count = 0
         error_count = 0
         total_files = len(self._files)
@@ -194,9 +178,7 @@ class FileListScreen(Screen):
         self.app.call_from_thread(exporting_screen.set_complete, message)
 
         # Pop the screen after a short delay to show completion
-        import time
-        time.sleep(1.5)
-        self.app.call_from_thread(self.app.pop_screen)
+        self._dismiss_export_screen()
 
     def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
         """Handle file selection."""

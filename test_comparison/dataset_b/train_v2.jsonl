@@ -1,0 +1,3 @@
+{"uuid": "aaa111", "messages": [{"role": "user", "content": "Hello, world!"}, {"role": "assistant", "content": "Hi there! How can I help?"}]}
+{"uuid": "bbb222", "messages": [{"role": "user", "content": "What is 2+2?"}, {"role": "assistant", "content": "2 + 2 = 4"}]}
+{"uuid": "ddd444", "messages": [{"role": "user", "content": "New record with different UUID"}]}

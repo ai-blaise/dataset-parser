@@ -1,0 +1,26 @@
+[
+  {
+    "uuid": "sample-a1",
+    "messages": [
+      {"role": "user", "content": "What is machine learning?"},
+      {"role": "assistant", "content": "Machine learning is a subset of AI that learns from data."}
+    ],
+    "license": "MIT"
+  },
+  {
+    "uuid": "sample-a2",
+    "messages": [
+      {"role": "user", "content": "Explain neural networks"},
+      {"role": "assistant", "content": "Neural networks are computing systems inspired by biological brains."}
+    ],
+    "license": "Apache-2.0"
+  },
+  {
+    "uuid": "sample-a3",
+    "messages": [
+      {"role": "system", "content": "You are a data scientist."},
+      {"role": "user", "content": "What is overfitting?"},
+      {"role": "assistant", "content": "Overfitting occurs when a model learns noise instead of patterns."}
+    ]
+  }
+]

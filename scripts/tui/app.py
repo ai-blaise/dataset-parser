@@ -14,157 +14,29 @@ import argparse
 import os
 import sys
 from enum import Enum
+from typing import Any
 
 from textual.app import App
 from textual.binding import Binding
-from textual.screen import Screen
-from textual.widgets import Static, ProgressBar, Footer, Header
-from textual.containers import Center, Middle
-from textual import work
 
 from scripts.data_formats import detect_format, discover_data_files
+from scripts.tui.data_loader import get_record_count, load_all_records, load_records, set_cached_records
+from scripts.tui.mixins import BackgroundTaskMixin
+from scripts.tui.screens import ExportingScreen, LoadingScreen
 from scripts.tui.views.comparison_screen import ComparisonScreen
 from scripts.tui.views.file_list import FileListScreen
 from scripts.tui.views.record_list import RecordListScreen
-from scripts.tui.data_loader import load_all_records, load_records, set_cached_records
 
 
 class AppMode(Enum):
-    """Application mode for single file vs directory."""
+    """Application mode for single file vs directory vs comparison."""
 
     SINGLE_FILE = "single_file"
     DIRECTORY = "directory"
+    COMPARISON = "comparison"
 
 
-# Maximum file size (in bytes) for synchronous loading (100 MB)
-MAX_SYNC_LOAD_SIZE = 100 * 1024 * 1024
-
-
-class LoadingScreen(Screen):
-    """Screen displayed while loading large files."""
-
-    CSS = """
-    LoadingScreen {
-        align: center middle;
-    }
-
-    #loading-container {
-        width: 60;
-        height: 10;
-        border: solid $primary;
-        padding: 1 2;
-    }
-
-    #loading-text {
-        text-align: center;
-        margin-bottom: 1;
-    }
-
-    #loading-progress {
-        text-align: center;
-        color: $text-muted;
-    }
-    """
-
-    def __init__(self, filename: str) -> None:
-        super().__init__()
-        self.filename = filename
-        self._loaded_count = 0
-
-    def compose(self):
-        yield Header()
-        with Center():
-            with Middle(id="loading-container"):
-                yield Static("Loading records...", id="loading-text")
-                yield Static("0 records loaded", id="loading-progress")
-        yield Footer()
-
-    def update_progress(self, count: int) -> None:
-        """Update the loading progress display."""
-        self._loaded_count = count
-        progress = self.query_one("#loading-progress", Static)
-        progress.update(f"{count:,} records loaded")
-
-
-class ExportingScreen(Screen):
-    """Screen displayed while exporting files/records."""
-
-    CSS = """
-    ExportingScreen {
-        align: center middle;
-    }
-
-    #exporting-container {
-        width: 60;
-        height: 12;
-        border: solid $success;
-        padding: 1 2;
-    }
-
-    #exporting-title {
-        text-align: center;
-        text-style: bold;
-        margin-bottom: 1;
-    }
-
-    #exporting-status {
-        text-align: center;
-        margin-bottom: 1;
-    }
-
-    #exporting-progress {
-        text-align: center;
-        color: $text-muted;
-    }
-    """
-
-    def __init__(self, title: str = "Exporting...") -> None:
-        super().__init__()
-        self._title = title
-        self._current = 0
-        self._total = 0
-        self._current_file = ""
-
-    def compose(self):
-        yield Header()
-        with Center():
-            with Middle(id="exporting-container"):
-                yield Static(self._title, id="exporting-title")
-                yield Static("Preparing...", id="exporting-status")
-                yield Static("", id="exporting-progress")
-        yield Footer()
-
-    def update_progress(self, current: int, total: int, current_file: str = "") -> None:
-        """Update the export progress display."""
-        self._current = current
-        self._total = total
-        self._current_file = current_file
-
-        status = self.query_one("#exporting-status", Static)
-        progress = self.query_one("#exporting-progress", Static)
-
-        if current_file:
-            status.update(f"Processing: {current_file}")
-        else:
-            status.update("Processing...")
-
-        if total > 0:
-            progress.update(f"{current} / {total} completed")
-        else:
-            progress.update(f"{current} completed")
-
-    def set_complete(self, message: str) -> None:
-        """Show completion message."""
-        status = self.query_one("#exporting-status", Static)
-        progress = self.query_one("#exporting-progress", Static)
-        title = self.query_one("#exporting-title", Static)
-
-        title.update("Export Complete")
-        status.update(message)
-        progress.update("Press any key to continue...")
-
-
-class JsonComparisonApp(App):
+class JsonComparisonApp(BackgroundTaskMixin, App):
     """A Textual app for comparing original and processed dataset records."""
 
     TITLE = "Dataset Viewer"
@@ -283,6 +155,8 @@ class JsonComparisonApp(App):
         input_format: str = "auto",
         is_directory: bool = False,
         output_dir: str | None = None,
+        compare_path: str | None = None,
+        is_compare_directory: bool = False,
     ):
         """Initialize the app with a data file or directory.
 
@@ -291,27 +165,90 @@ class JsonComparisonApp(App):
             input_format: Format hint ('auto', 'jsonl', 'json', 'parquet').
             is_directory: Whether path is a directory.
             output_dir: Output directory for export operations.
+            compare_path: Path to second dataset for comparison mode.
+            is_compare_directory: Whether compare_path is a directory.
         """
         super().__init__()
         self._path = path
         self._input_format = input_format
         self._is_directory = is_directory
         self._output_dir = output_dir
-        self._current_file: str | None = None  # Track selected file in dir mode
-        # Backward compatibility
+        self._current_file: str | None = None
         self.filename = path if not is_directory else ""
         self.records: list[dict] = []
         self._loading = False
         self._file_format: str = "unknown"
 
+        # Comparison mode fields
+        self._compare_path = compare_path
+        self._is_compare_directory = is_compare_directory
+        self._compare_records: list[dict] = []
+        self._compare_left_file: str | None = None
+        self._compare_right_file: str | None = None
+        self._compare_left_index: int = 0
+
     def on_mount(self) -> None:
-        """Load data and push the appropriate screen."""
-        if self._is_directory:
-            # Directory mode - show file picker
+        """Load data and push the appropriate screen based on mode."""
+        if self._compare_path:
+            self.mode = AppMode.COMPARISON
+            self._setup_comparison_mode()
+        elif self._is_directory:
+            self.mode = AppMode.DIRECTORY
             self._load_directory()
         else:
-            # Single file mode - load the file directly
+            self.mode = AppMode.SINGLE_FILE
             self._load_single_file(self._path)
+
+    def _setup_comparison_mode(self) -> None:
+        """Set up comparison mode - requires both paths to be directories."""
+        if not self._is_directory or not self._is_compare_directory:
+            self.notify(
+                "Comparison mode requires both paths to be directories",
+                severity="error",
+            )
+            return
+        self._load_comparison_directory()
+
+    def _load_comparison_directory(self) -> None:
+        """Load directories and push DualRecordListScreen with independent panes."""
+        from scripts.tui.views.dual_record_list_screen import DualRecordListScreen
+
+        if not self._compare_path:
+            self.notify("No comparison path specified", severity="error")
+            return
+
+        if not os.path.isdir(self._path):
+            self.notify(f"Left path is not a directory: {self._path}", severity="error")
+            return
+        if not os.path.isdir(self._compare_path):
+            self.notify(
+                f"Right path is not a directory: {self._compare_path}", severity="error"
+            )
+            return
+
+        left_basename = os.path.basename(self._path)
+        right_basename = os.path.basename(self._compare_path)
+        self.title = f"Dataset Comparison - {left_basename} ↔ {right_basename}"
+
+        self.push_screen(DualRecordListScreen(self._path, self._compare_path))
+
+    def on_record_list_screen_record_selected(
+        self, message: RecordListScreen.RecordSelected
+    ) -> None:
+        """Handle record selection from the list screen."""
+        self.show_comparison(message.index)
+
+    def on_file_list_screen_file_selected(
+        self, event: FileListScreen.FileSelected
+    ) -> None:
+        """Handle file selection from directory listing."""
+        self._current_file = event.file_path
+        self._load_single_file(event.file_path)
+
+    def show_comparison(self, index: int) -> None:
+        """Push the comparison screen for the selected record."""
+        filename = self.filename or ""
+        self.push_screen(ComparisonScreen(filename, index))
 
     def _load_directory(self) -> None:
         """Load directory and show file list."""
@@ -340,89 +277,56 @@ class JsonComparisonApp(App):
         self.title = f"Dataset Viewer - {basename} ({self._file_format})"
 
         # Check file size to decide loading strategy
-        try:
-            file_size = os.path.getsize(filepath)
-        except OSError:
-            file_size = 0
-
-        if file_size > MAX_SYNC_LOAD_SIZE:
+        if self.should_load_async(filepath):
             # Large file - use async loading with progress
             self._loading = True
-            self.push_screen(LoadingScreen(filepath))
-            self._load_records_async()
+            # Get total count for progress display
+            try:
+                total = get_record_count(filepath)
+            except Exception:
+                total = None
+            self._run_loading_task(
+                filename=basename,
+                load_fn=lambda: load_records(filepath),
+                on_complete=self._on_records_loaded,
+                on_error=self._on_loading_error,
+                total_count=total,
+            )
         else:
             # Small file - load synchronously
             try:
                 self.records = load_all_records(filepath)
-                self.push_screen(RecordListScreen())
+                self._push_appropriate_screen()
             except Exception as e:
                 self.notify(f"Error loading file: {e}", severity="error")
-                # Don't push screen if loading fails
 
-    @work(thread=True)
-    def _load_records_async(self) -> None:
-        """Load records in a background thread for large files."""
-        records: list[dict] = []
-        try:
-            # Use format-aware loading with schema normalization
-            for i, record in enumerate(load_records(self.filename)):
-                records.append(record)
-                # Update progress every 1000 records
-                if i % 1000 == 0:
-                    self.call_from_thread(self._update_loading_progress, i + 1)
-
-            # Cache the loaded records
-            set_cached_records(self.filename, records)
-            self.records = records
-            self.call_from_thread(self._loading_complete)
-        except Exception as e:
-            self.call_from_thread(self._loading_error, str(e))
-
-    def _update_loading_progress(self, count: int) -> None:
-        """Update the loading screen progress."""
-        try:
-            screen = self.screen
-            if isinstance(screen, LoadingScreen):
-                screen.update_progress(count)
-        except Exception:
-            pass
-
-    def _loading_complete(self) -> None:
-        """Called when async loading is complete."""
+    def _on_records_loaded(self, records: list[dict[str, Any]]) -> None:
+        """Called when async loading completes successfully."""
         self._loading = False
-        self.pop_screen()  # Remove loading screen
-        self.push_screen(RecordListScreen())
+        set_cached_records(self.filename, records)
+        self.records = records
+        self._push_appropriate_screen()
         self.notify(f"Loaded {len(self.records):,} records")
 
-    def _loading_error(self, error: str) -> None:
+    def _push_appropriate_screen(self) -> None:
+        """Push RecordListScreen or ComparisonScreen based on record count.
+
+        If there's only 1 record, skip the record list and go directly
+        to the comparison view. Otherwise show the record list for selection.
+        """
+        if len(self.records) == 1:
+            # Single record - go straight to comparison view
+            self.push_screen(ComparisonScreen(self.filename, 0))
+        else:
+            # Multiple records - show record list for selection
+            self.push_screen(RecordListScreen())
+
+    def _on_loading_error(self, error: str) -> None:
         """Called when async loading fails."""
         self._loading = False
         self.notify(f"Error loading file: {error}", severity="error")
-        self.pop_screen()  # Remove loading screen
         self.records = []
         self.push_screen(RecordListScreen())
-
-    def on_record_list_screen_record_selected(
-        self, message: RecordListScreen.RecordSelected
-    ) -> None:
-        """Handle record selection from the list screen."""
-        self.show_comparison(message.index)
-
-    def on_file_list_screen_file_selected(
-        self, event: FileListScreen.FileSelected
-    ) -> None:
-        """Handle file selection from directory listing."""
-        self._current_file = event.file_path
-        # Load the selected file and show record list
-        self._load_single_file(event.file_path)
-
-    def show_comparison(self, index: int) -> None:
-        """Push the comparison screen for the selected record.
-
-        Args:
-            index: The index of the record to compare.
-        """
-        self.push_screen(ComparisonScreen(self.filename, index))
 
 
 def main() -> None:
@@ -433,12 +337,20 @@ def main() -> None:
     )
     parser.add_argument(
         "path",
-        help="Path to data file or directory of data files (JSONL, JSON, or Parquet)"
+        help="Path to data file or directory of data files (JSONL, JSON, or Parquet)",
     )
     parser.add_argument(
-        "-O", "--output-dir",
+        "-O",
+        "--output-dir",
         default="parsed_datasets",
-        help="Output directory for export operations (default: parsed_datasets)"
+        help="Output directory for export operations (default: parsed_datasets)",
+    )
+    parser.add_argument(
+        "--compare",
+        "-c",
+        dest="compare_path",
+        default=None,
+        help="Path to second dataset for side-by-side comparison",
     )
     args = parser.parse_args()
 
@@ -451,14 +363,34 @@ def main() -> None:
         print(f"Error: Permission denied: {args.path}", file=sys.stderr)
         sys.exit(1)
 
+    # Verify compare path exists if provided
+    if args.compare_path:
+        if not os.path.exists(args.compare_path):
+            print(
+                f"Error: Compare path not found: {args.compare_path}", file=sys.stderr
+            )
+            sys.exit(1)
+
+        if not os.access(args.compare_path, os.R_OK):
+            print(
+                f"Error: Compare path permission denied: {args.compare_path}",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+
     # Determine if path is file or directory
     is_directory = os.path.isdir(args.path)
+    is_compare_directory = (
+        os.path.isdir(args.compare_path) if args.compare_path else False
+    )
 
     app = JsonComparisonApp(
         path=args.path,
         input_format="auto",
         is_directory=is_directory,
         output_dir=args.output_dir,
+        compare_path=args.compare_path,
+        is_compare_directory=is_compare_directory,
     )
     app.run()
 

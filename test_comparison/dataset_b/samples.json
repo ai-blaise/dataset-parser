@@ -1,0 +1,27 @@
+[
+  {
+    "uuid": "sample-a1",
+    "messages": [
+      {"role": "user", "content": "What is machine learning?"},
+      {"role": "assistant", "content": "ML is a branch of AI where systems learn and improve from experience without being explicitly programmed."}
+    ],
+    "license": "MIT",
+    "version": "2.0"
+  },
+  {
+    "uuid": "sample-a2",
+    "messages": [
+      {"role": "user", "content": "Explain neural networks"},
+      {"role": "assistant", "content": "Neural networks are layers of interconnected nodes that process information similar to the human brain."}
+    ],
+    "license": "Apache-2.0"
+  },
+  {
+    "uuid": "sample-b1",
+    "messages": [
+      {"role": "user", "content": "What is deep learning?"},
+      {"role": "assistant", "content": "Deep learning uses multi-layered neural networks to learn complex patterns."}
+    ],
+    "license": "BSD-3"
+  }
+]

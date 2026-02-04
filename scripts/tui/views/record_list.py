@@ -16,11 +16,17 @@ from textual.message import Message
 from textual.screen import Screen
 from textual.widgets import DataTable, Footer, Header
 
-from scripts.tui.data_loader import export_records, get_record_summary
+from scripts.tui.data_loader import (
+    export_records,
+    get_field_mapping,
+    get_record_summary,
+    FieldMapping,
+)
+from scripts.tui.mixins import ExportMixin, RecordTableMixin, VimNavigationMixin
 from scripts.parser_finale import process_record
 
 
-class RecordListScreen(Screen):
+class RecordListScreen(ExportMixin, RecordTableMixin, VimNavigationMixin, Screen):
     """Screen that displays a list of JSONL records in a DataTable."""
 
     CSS = """
@@ -33,21 +39,6 @@ class RecordListScreen(Screen):
         border: solid $primary;
     }
 
-    DataTable > .datatable--header {
-        background: $primary;
-        color: $text;
-        text-style: bold;
-    }
-
-    DataTable > .datatable--cursor {
-        background: $secondary;
-        color: $text;
-    }
-
-    DataTable > .datatable--hover {
-        background: $primary-darken-2;
-    }
-
     Header {
         dock: top;
     }
@@ -57,21 +48,12 @@ class RecordListScreen(Screen):
     }
     """
 
-    BINDINGS = [
+    BINDINGS = VimNavigationMixin.VIM_BINDINGS + [
         Binding("q", "quit", "Quit", show=False),
         Binding("escape", "go_back", "Back", show=True),
         Binding("b", "go_back", "Back", show=False),
         Binding("X", "export_all", "Export All"),
     ]
-
-    # Column key to field name mapping
-    COLUMN_TO_FIELD: dict[str, str] = {
-        "idx": "index",
-        "uuid": "uuid",
-        "msgs": "messages",
-        "tools": "tools",
-        "preview": "preview",
-    }
 
     class RecordSelected(Message):
         """Message posted when a record is selected."""
@@ -106,7 +88,7 @@ class RecordListScreen(Screen):
         if self._filename:
             return self._filename
         # Try to get from app if available
-        if hasattr(self.app, 'filename'):
+        if hasattr(self.app, "filename"):
             return self.app.filename
         return None
 
@@ -123,39 +105,29 @@ class RecordListScreen(Screen):
 
     def _load_data(self) -> None:
         """Load JSONL data and populate the DataTable."""
-        table = self.query_one("#record-table", DataTable)
-
-        # Add columns (simplified for comparison view)
-        table.add_column("IDX", key="idx", width=6)
-        table.add_column("UUID", key="uuid", width=15)
-        table.add_column("MSGS", key="msgs", width=6)
-        table.add_column("TOOLS", key="tools", width=6)
-        table.add_column("PREVIEW", key="preview")
-
         # Use records from app (already loaded and cached)
-        if hasattr(self.app, 'records') and self.app.records:
+        if hasattr(self.app, "records") and self.app.records:
             self._records = self.app.records
         else:
-            # Fallback: no records available
-            table.add_row("--", "No records loaded", "--", "--", "--")
-            return
+            self._records = []
+
+        # Get field mapping for the file
+        mapping = get_field_mapping(self.filename) if self.filename else FieldMapping()
+
+        # Setup table with dynamic columns based on mapping (from RecordTableMixin)
+        columns = self._get_record_columns(mapping)
+        table = self._setup_table("record-table", columns)
 
         if not self._records:
-            table.add_row("--", "No records found", "--", "--", "--")
+            # Create placeholder row matching column count
+            placeholder = ["--"] * len(columns)
+            if len(placeholder) > 1:
+                placeholder[1] = "No records found"
+            table.add_row(*placeholder)
             return
 
-        # Populate table with record summaries
-        for idx, record in enumerate(self._records):
-            summary = get_record_summary(record, idx)
-
-            table.add_row(
-                str(summary['index']),
-                summary['uuid'],
-                str(summary['msg_count']),
-                str(summary['tool_count']),
-                summary['preview'],
-                key=str(idx),
-            )
+        # Populate table using mixin method
+        self._populate_record_table(table, self._records, mapping)
 
     def action_quit(self) -> None:
         """Quit the application."""
@@ -184,10 +156,7 @@ class RecordListScreen(Screen):
     @work(thread=True)
     def _run_export_all_records(self, exporting_screen: "ExportingScreen") -> None:
         """Run the export in a background thread."""
-        output_dir = getattr(self.app, "_output_dir", None)
-        if not output_dir:
-            output_dir = "parsed_datasets"
-
+        output_dir = self._get_output_dir()
         total_records = len(self._records)
         processed_records = []
 
@@ -230,9 +199,7 @@ class RecordListScreen(Screen):
             )
 
         # Pop the screen after a short delay to show completion
-        import time
-        time.sleep(1.5)
-        self.app.call_from_thread(self.app.pop_screen)
+        self._dismiss_export_screen()
 
     def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
         """Handle row selection from the DataTable (Enter key press)."""

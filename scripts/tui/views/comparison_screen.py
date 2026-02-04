@@ -16,22 +16,28 @@ from textual.containers import Horizontal, Vertical
 from textual.screen import Screen
 from textual.widgets import Footer, Header, Static
 
-from scripts.tui.data_loader import export_records, load_record_pair
-
-# Maximum recursion depth for expand/collapse operations
-MAX_TREE_DEPTH = 50
+from scripts.tui.data_loader import (
+    detect_messages_field,
+    export_records,
+    FieldMapping,
+    get_field_mapping,
+    load_record_pair,
+)
+from scripts.tui.mixins import DualPaneMixin, ExportMixin, VimNavigationMixin
 from scripts.tui.widgets import FieldDetailModal
 from scripts.tui.widgets.diff_indicator import calculate_diff
-from scripts.tui.widgets.json_tree_panel import JsonTreePanel
+from scripts.tui.widgets.json_tree_panel import MAX_TREE_DEPTH, JsonTreePanel
 
 
-class ComparisonScreen(Screen):
+class ComparisonScreen(ExportMixin, DualPaneMixin, VimNavigationMixin, Screen):
     """Side-by-side JSON comparison view.
 
     This screen displays the original JSONL record on the left and the
     parser_finale processed output on the right, allowing comparison
     of the transformation.
     """
+
+    CSS_PATH = "../styles/base.tcss"
 
     CSS = """
     ComparisonScreen {
@@ -43,72 +49,20 @@ class ComparisonScreen(Screen):
     }
 
     #left-panel, #right-panel {
-        width: 50%;
-        border: solid $primary;
         padding: 0 1;
     }
 
     #left-panel {
         border-right: none;
     }
-
-    .panel-header {
-        height: 3;
-        width: 100%;
-        background: $surface;
-        border-bottom: solid $primary;
-        text-align: center;
-        text-style: bold;
-        padding: 1;
-        content-align: center middle;
-    }
-
-    #left-panel .panel-header {
-        background: $primary;
-        color: auto;
-    }
-
-    #right-panel .panel-header {
-        background: $success;
-        color: auto;
-    }
-
-    #left-tree, #right-tree {
-        height: 1fr;
-    }
-
-    Header {
-        dock: top;
-    }
-
-    Footer {
-        dock: bottom;
-    }
-
-    /* Diff highlighting classes (to be used by diff functionality) */
-    .diff-added {
-        background: $success 20%;
-    }
-
-    .diff-removed {
-        background: $error 20%;
-    }
-
-    .diff-changed {
-        background: $warning 20%;
-    }
+    /* Note: Diff highlighting classes (.diff-added, .diff-removed, .diff-changed)
+       are defined in base.tcss and inherited via CSS_PATH */
     """
 
-    BINDINGS = [
-        Binding("escape", "go_back", "Back", show=True),
-        Binding("b", "go_back", "Back", show=False),
-        Binding("q", "quit", "Quit"),
-        Binding("left", "focus_left", "Left Panel", show=False),
-        Binding("right", "focus_right", "Right Panel", show=False),
-        Binding("tab", "switch_panel", "Switch Panel"),
+    # All dual-pane bindings plus screen-specific bindings
+    BINDINGS = DualPaneMixin.DUAL_PANE_BINDINGS + [
         Binding("s", "toggle_sync", "Sync Scroll"),
         Binding("d", "toggle_diff", "Show Diff"),
-        Binding("m", "show_field_detail", "View Field", show=True),
         Binding("e", "expand_all", "Expand All"),
         Binding("c", "collapse_all", "Collapse All"),
         Binding("x", "export_record", "Export Record"),
@@ -138,16 +92,15 @@ class ComparisonScreen(Screen):
         self._processed: dict[str, Any] = {}
         self._sync_enabled: bool = True
         self._diff_enabled: bool = False
-        self._active_panel: str = "left"
 
     def compose(self) -> ComposeResult:
         """Compose the screen layout with side-by-side panels."""
         yield Header()
         with Horizontal(id="comparison-container"):
-            with Vertical(id="left-panel"):
+            with Vertical(id="left-panel", classes="active"):
                 yield Static("Original Record", classes="panel-header")
                 yield JsonTreePanel(label="original", id="left-tree")
-            with Vertical(id="right-panel"):
+            with Vertical(id="right-panel", classes="inactive"):
                 yield Static("Parsed Output", classes="panel-header")
                 yield JsonTreePanel(label="processed", id="right-tree")
         yield Footer()
@@ -157,24 +110,47 @@ class ComparisonScreen(Screen):
         self._load_comparison_data()
 
     def _load_comparison_data(self) -> None:
-        """Load the original and processed records and display them."""
+        """Load the original and processed records and display them.
+
+        If the record doesn't have a standard messages field, falls back
+        to "raw mode" showing the original record on both sides without
+        processing. This handles non-standard schemas gracefully.
+        """
         try:
             # Use cached records from app if available
             cached_records = None
-            if hasattr(self.app, 'records') and self.app.records:
+            if hasattr(self.app, "records") and self.app.records:
                 cached_records = self.app.records
 
             self._original, self._processed = load_record_pair(
                 self._filename, self._record_index, cached_records=cached_records
             )
+
+            # Check if the record has a detectable messages field
+            has_messages = detect_messages_field(self._original)
+            if not has_messages:
+                # Raw mode: show original on both sides, skip processing
+                self._processed = self._original.copy()
+                self.notify(
+                    "Non-standard schema - showing raw data", severity="warning"
+                )
         except (FileNotFoundError, IndexError) as e:
             # Show error in both panels
             self._original = {"error": str(e)}
             self._processed = {"error": str(e)}
 
-        # Get UUID for title
-        uuid = self._original.get("uuid", "Unknown")
-        self.title = f"Record {self._record_index}: {uuid}"
+        # Get detected ID field for dynamic title
+        mapping = (
+            get_field_mapping(self._filename) if self._filename else FieldMapping()
+        )
+        id_field = mapping.uuid or "example_id"
+
+        if id_field in self._original:
+            id_value = str(self._original[id_field])[:8]
+        else:
+            id_value = f"idx:{self._record_index}"
+
+        self.title = f"Record {self._record_index}: {id_value}"
 
         # Load data into tree panels
         left_tree = self.query_one("#left-tree", JsonTreePanel)
@@ -183,8 +159,9 @@ class ComparisonScreen(Screen):
         left_tree.load_json(self._original, label=f"Record {self._record_index}")
         right_tree.load_json(self._processed, label=f"Record {self._record_index}")
 
-        # Focus the left panel by default
+        # Focus the left panel by default and update styles
         left_tree.focus()
+        self._update_panel_styles()
 
     def action_go_back(self) -> None:
         """Return to the record list screen."""
@@ -194,22 +171,12 @@ class ComparisonScreen(Screen):
         """Quit the application."""
         self.app.exit()
 
-    def action_focus_left(self) -> None:
-        """Focus the left panel."""
-        self._active_panel = "left"
-        self.query_one("#left-tree", JsonTreePanel).focus()
-
-    def action_focus_right(self) -> None:
-        """Focus the right panel."""
-        self._active_panel = "right"
-        self.query_one("#right-tree", JsonTreePanel).focus()
-
-    def action_switch_panel(self) -> None:
-        """Switch focus between left and right panels."""
+    def _focus_active_widget(self) -> None:
+        """Focus the appropriate widget in the active panel."""
         if self._active_panel == "left":
-            self.action_focus_right()
+            self.query_one("#left-tree", JsonTreePanel).focus()
         else:
-            self.action_focus_left()
+            self.query_one("#right-tree", JsonTreePanel).focus()
 
     def action_toggle_sync(self) -> None:
         """Toggle synchronized scrolling between panels."""
@@ -253,17 +220,6 @@ class ComparisonScreen(Screen):
         status = "enabled" if self._diff_enabled else "disabled"
         self.notify(f"Diff highlighting {status}")
 
-    def action_show_field_detail(self) -> None:
-        """Show the field detail modal for the current node."""
-        # Get the currently focused tree
-        if self._active_panel == "left":
-            tree = self.query_one("#left-tree", JsonTreePanel)
-        else:
-            tree = self.query_one("#right-tree", JsonTreePanel)
-
-        # Emit the node selected message which will trigger the modal
-        tree.emit_node_selected()
-
     def action_expand_all(self) -> None:
         """Expand all nodes in both trees."""
         left_tree = self.query_one("#left-tree", JsonTreePanel)
@@ -299,10 +255,7 @@ class ComparisonScreen(Screen):
     @work(thread=True)
     def _run_export_record(self, exporting_screen: "ExportingScreen") -> None:
         """Run the single record export in a background thread."""
-        output_dir = getattr(self.app, "_output_dir", None)
-        if not output_dir:
-            output_dir = "parsed_datasets"
-
+        output_dir = self._get_output_dir()
         self.app.call_from_thread(
             exporting_screen.update_progress,
             0,
@@ -328,9 +281,7 @@ class ComparisonScreen(Screen):
             )
 
         # Pop the screen after a short delay to show completion
-        import time
-        time.sleep(1.0)
-        self.app.call_from_thread(self.app.pop_screen)
+        self._dismiss_export_screen()
 
     def _expand_all_nodes(self, node: Any, depth: int = 0) -> None:
         """Recursively expand all nodes starting from the given node.
