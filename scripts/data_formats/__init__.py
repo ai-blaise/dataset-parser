@@ -31,6 +31,7 @@ from scripts.data_formats.format_detector import (
     get_loader,
     get_loader_for_format,
 )
+from scripts.data_formats.csv_loader import CSVLoader
 from scripts.data_formats.json_loader import JSONLoader
 from scripts.data_formats.jsonl_loader import JSONLLoader
 from scripts.data_formats.parquet_loader import ParquetLoader
@@ -62,6 +63,7 @@ __all__ = [
     "get_parquet_only_fields",
     "is_normalized",
     # Loaders
+    "CSVLoader",
     "JSONLLoader",
     "JSONLoader",
     "ParquetLoader",

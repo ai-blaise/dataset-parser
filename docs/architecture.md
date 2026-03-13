@@ -36,12 +36,19 @@ dataset-parser/
 │   ├── data_splitter.py       # Dataset splitting utility
 │   ├── data_formats/          # Multi-format data loaders
 │   │   ├── base.py            # Abstract DataLoader class
+│   │   ├── csv_loader.py      # CSV format
 │   │   ├── jsonl_loader.py    # JSONL format
 │   │   ├── json_loader.py     # JSON format
 │   │   ├── parquet_loader.py  # Parquet format
 │   │   ├── format_detector.py # Auto-detection
 │   │   ├── schema_normalizer.py
 │   │   └── directory_loader.py
+│   ├── dataset_mixer/         # Opinionated dataset mixing pipeline
+│   │   ├── __main__.py        # Entry point
+│   │   ├── cli.py             # CLI definition
+│   │   ├── mixer.py           # Core mixing logic
+│   │   ├── adapters.py        # Per-source adapters
+│   │   └── schema.py          # PyArrow output schema
 │   └── tui/                   # Terminal UI application
 │       ├── app.py             # Main Textual app
 │       ├── data_loader.py     # Data loading with schema detection
@@ -82,10 +89,10 @@ dataset-parser/
 │                    dataset-parser Application                     │
 ├──────────────────────────────────────────────────────────────────┤
 │                                                                   │
-│  ┌─────────────┬──────────────┬─────────────┬──────────────────┐ │
-│  │  CLI Tool   │Parser Finale │    TUI      │  Data Splitter   │ │
-│  │ (main.py)   │(AI-specific) │  (app.py)   │ (data_splitter)  │ │
-│  └──────┬──────┴──────┬───────┴──────┬──────┴──────────────────┘ │
+│  ┌──────────┬──────────────┬─────────┬──────────────┬────────────┐ │
+│  │CLI Tool  │Parser Finale │  TUI    │Data Splitter │Dataset     │ │
+│  │(main.py) │(AI-specific) │(app.py) │(data_splitter)│Mixer      │ │
+│  └────┬─────┴──────┬───────┴────┬────┴──────────────┴─────┬──────┘ │
 │         │             │              │                            │
 │         └─────────────┼──────────────┘                            │
 │                       │                                           │
@@ -98,6 +105,7 @@ dataset-parser/
 │            ┌──────────▼──────────┐                                │
 │            │   Format Loaders    │   ← Pluggable Architecture     │
 │            │  (data_formats/)    │                                │
+│            │  ├── CSV            │                                │
 │            │  ├── JSONL          │                                │
 │            │  ├── JSON           │                                │
 │            │  └── Parquet        │                                │
@@ -168,6 +176,24 @@ A standalone utility for splitting JSONL files into N equal (or near-equal) part
 - Preserves exact line formatting
 
 See [Data Splitter Documentation](data-splitter.md) for detailed usage.
+
+### Dataset Mixer (`scripts/dataset_mixer/`)
+
+An opinionated pipeline that combines specific HuggingFace datasets into a single unified Parquet training file. This is **not** a general-purpose mixer — it has dedicated adapters for each target dataset:
+
+| Adapter | Dataset | Format | Transform |
+|---------|---------|--------|-----------|
+| `NemotronAdapter` | `nvidia/Nemotron-Terminal-Corpus` | Parquet | Drop `trial_name`/`source`, add `source_dataset` |
+| `MessagesJSONLAdapter` | `TeichAI/deepseek-v3.2-speciale-openr1-math-3k` | JSONL | Rename `messages` → `conversations`, fill metadata |
+| `PromptCompletionCSVAdapter` | `sequelbox/Raiden-Mini-DeepSeek-V3.2-Speciale` | CSV | Construct `conversations` from prompt/completion pairs |
+
+Key design decisions:
+- **Adapter auto-detection**: File format + column inspection determines adapter
+- **Streaming**: Processes records in batches (default 10K) to handle large files (162K+ rows)
+- **Schema enforcement**: Output uses an explicit `pa.schema()`, not inferred
+- **Provenance**: `source_dataset` column is derived from the HuggingFace directory name
+
+See the [Dataset Mixer section in README](../README.md#dataset-mixer) for usage.
 
 ### Data Loader (`scripts/tui/data_loader.py`)
 

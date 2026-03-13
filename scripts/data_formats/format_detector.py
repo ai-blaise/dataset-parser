@@ -19,10 +19,11 @@ EXTENSION_MAP: dict[str, str] = {
     ".json": "json",
     ".parquet": "parquet",
     ".pq": "parquet",
+    ".csv": "csv",
 }
 
 # Supported format names
-SUPPORTED_FORMATS = frozenset(["jsonl", "json", "parquet"])
+SUPPORTED_FORMATS = frozenset(["jsonl", "json", "parquet", "csv"])
 
 
 def detect_format(filename: str) -> str:
@@ -102,6 +103,7 @@ def get_loader(filename: str) -> "DataLoader":
         ...     print(record)
     """
     # Import loaders here to avoid circular imports
+    from scripts.data_formats.csv_loader import CSVLoader
     from scripts.data_formats.json_loader import JSONLoader
     from scripts.data_formats.jsonl_loader import JSONLLoader
     from scripts.data_formats.parquet_loader import ParquetLoader
@@ -112,6 +114,7 @@ def get_loader(filename: str) -> "DataLoader":
         "jsonl": JSONLLoader(),
         "json": JSONLoader(),
         "parquet": ParquetLoader(),
+        "csv": CSVLoader(),
     }
 
     return loaders[format_type]
@@ -135,6 +138,7 @@ def get_loader_for_format(format_name: str) -> "DataLoader":
         'parquet'
     """
     # Import loaders here to avoid circular imports
+    from scripts.data_formats.csv_loader import CSVLoader
     from scripts.data_formats.json_loader import JSONLoader
     from scripts.data_formats.jsonl_loader import JSONLLoader
     from scripts.data_formats.parquet_loader import ParquetLoader
@@ -149,6 +153,7 @@ def get_loader_for_format(format_name: str) -> "DataLoader":
         "jsonl": JSONLLoader(),
         "json": JSONLoader(),
         "parquet": ParquetLoader(),
+        "csv": CSVLoader(),
     }
 
     return loaders[format_name]

@@ -6,9 +6,9 @@ A dataset exploration and comparison tool with an interactive TUI. Currently opt
 
 - **Interactive TUI** - Browse and compare datasets in a terminal interface
 - **Side-by-Side Comparison** - Compare two datasets or original vs. processed records
-- **Multi-Format Support** - Load JSONL, JSON, and Parquet with automatic detection
+- **Multi-Format Support** - Load JSONL, JSON, Parquet, and CSV with automatic detection
 - **Dynamic Schema Detection** - Automatically detects message, ID, and tool fields
-
+- **Dataset Mixer** - Opinionated pipeline that combines specific HuggingFace datasets into a single unified Parquet training file (see [Dataset Mixer](#dataset-mixer) below)
 - **CLI Tools** - List, search, and analyze records from the command line
 - **Data Splitter** - Split large datasets into N parts for parallel processing
 
@@ -59,6 +59,19 @@ uv run python -m scripts.parser_finale dataset/conversations.jsonl -o prompts.js
 uv run python -m scripts.parser_finale dataset/train.jsonl -O parsed_datasets/
 ```
 
+### Mix datasets into unified training data
+
+```bash
+# Mix all datasets/ into a single Parquet file
+uv run python -m scripts.dataset_mixer datasets/ -o mixed_output.parquet
+
+# Dry-run — show record counts per source, no output written
+uv run python -m scripts.dataset_mixer datasets/ --dry-run
+
+# Custom output path
+uv run python -m scripts.dataset_mixer datasets/ -o training/final_mix.parquet
+```
+
 ### Split a dataset into parts
 
 ```bash
@@ -104,6 +117,26 @@ uv run python -m scripts.data_splitter dataset/conversations.jsonl -n 10 --dry-r
 | `markdown` | Human-readable format |
 | `text` | Plain text summary |
 
+## Dataset Mixer
+
+The Dataset Mixer is an **opinionated pipeline** built specifically to combine these HuggingFace datasets into a single unified Parquet training file:
+
+| Dataset | Format | Description |
+|---------|--------|-------------|
+| [nvidia/Nemotron-Terminal-Corpus](https://huggingface.co/datasets/nvidia/Nemotron-Terminal-Corpus) | Parquet | Multi-turn terminal conversations (code, math, SWE, synthetic tasks) |
+| [TeichAI/deepseek-v3.2-speciale-openr1-math-3k](https://huggingface.co/datasets/TeichAI/deepseek-v3.2-speciale-openr1-math-3k) | JSONL | Single-turn math reasoning with `<think>` chains |
+| [sequelbox/Raiden-Mini-DeepSeek-V3.2-Speciale](https://huggingface.co/datasets/sequelbox/Raiden-Mini-DeepSeek-V3.2-Speciale) | CSV | Creative/analytic reasoning prompt-completion pairs |
+
+Each dataset has a dedicated adapter that handles its specific schema and normalizes records into a unified `conversations`-based output format with metadata columns. The `source_dataset` column tracks which HuggingFace dataset each record originated from (derived from the subdirectory name under `datasets/`).
+
+Place datasets in `datasets/` using their HuggingFace repository name as the directory:
+```
+datasets/
+├── Nemotron-Terminal-Corpus/
+├── deepseek-v3.2-speciale-openr1-math-3k/
+└── Raiden-Mini-DeepSeek-V3.2-Speciale/
+```
+
 ## Future Plans
 
 The tool is currently optimized for AI conversation datasets but is designed to become a **general-purpose dataset comparer**:
@@ -111,7 +144,7 @@ The tool is currently optimized for AI conversation datasets but is designed to 
 - **Configurable schema detection** - Support any JSON structure, not just conversations
 - **ID-based record matching** - Match records by key field instead of index
 - **Pluggable transformations** - Optional processing instead of hardcoded parser_finale
-- **Additional formats** - CSV, Excel/XLSX support
+- **Additional formats** - Excel/XLSX support
 
 ## Documentation
 
@@ -143,20 +176,28 @@ dataset-parser/
 │   ├── data_splitter.py  # Dataset splitting utility
 │   ├── data_formats/     # Multi-format data loaders
 │   │   ├── base.py       # Abstract base loader class
+│   │   ├── csv_loader.py
 │   │   ├── jsonl_loader.py
 │   │   ├── json_loader.py
 │   │   ├── parquet_loader.py
 │   │   ├── format_detector.py
 │   │   ├── schema_normalizer.py
 │   │   └── directory_loader.py
+│   ├── dataset_mixer/    # Opinionated dataset mixing pipeline
+│   │   ├── __main__.py   # Entry point (python -m scripts.dataset_mixer)
+│   │   ├── cli.py        # CLI: argparse definition
+│   │   ├── mixer.py      # Core mixing logic
+│   │   ├── adapters.py   # Per-source adapters + auto-detection
+│   │   └── schema.py     # Explicit PyArrow output schema
 │   └── tui/              # Terminal UI
 │       ├── app.py        # Main application
 │       ├── data_loader.py
 │       ├── views/        # Screen components
 │       └── widgets/      # Reusable UI widgets
 ├── tests/                # Test suite
+├── datasets/             # HuggingFace datasets (gitignored)
 ├── docs/                 # Documentation
-└── dataset/              # Data files (gitignored)
+└── plans/                # Design plans
 ```
 
 ## License

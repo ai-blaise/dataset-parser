@@ -1,0 +1,182 @@
+"""
+Core mixing pipeline for the dataset mixer.
+
+Discovers data files, auto-detects adapters, streams records through
+transforms, and writes a schema-enforced Parquet output.
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+from typing import Any, Iterator
+
+import pyarrow as pa
+import pyarrow.parquet as pq
+
+from scripts.data_formats.format_detector import EXTENSION_MAP
+from scripts.dataset_mixer.adapters import detect_adapter
+from scripts.dataset_mixer.schema import OUTPUT_SCHEMA
+
+
+def discover_files(input_dir: str) -> list[dict[str, str]]:
+  """Recursively discover all supported data files in a directory.
+
+  Args:
+      input_dir: Root directory to scan.
+
+  Returns:
+      List of dicts with 'path' and 'source_dataset' keys, sorted by path.
+      source_dataset is derived from the top-level subdirectory name.
+  """
+  root = Path(input_dir)
+  files: list[dict[str, str]] = []
+  supported = frozenset(EXTENSION_MAP.keys())
+
+  for filepath in sorted(root.rglob("*")):
+    if not filepath.is_file():
+      continue
+    if filepath.suffix.lower() not in supported:
+      continue
+
+    # Derive source_dataset from the first subdirectory under root
+    rel = filepath.relative_to(root)
+    source_dataset = rel.parts[0] if len(rel.parts) > 1 else root.name
+
+    files.append({
+      "path": str(filepath),
+      "source_dataset": source_dataset,
+    })
+
+  return files
+
+
+def stream_all(
+  input_dir: str,
+  file_list: list[dict[str, str]] | None = None,
+) -> Iterator[dict[str, Any]]:
+  """Stream all records from all files, transformed to the unified schema.
+
+  Args:
+      input_dir: Root directory (used if file_list is None).
+      file_list: Optional pre-computed file list from discover_files().
+
+  Yields:
+      Records conforming to OUTPUT_SCHEMA.
+  """
+  if file_list is None:
+    file_list = discover_files(input_dir)
+
+  for file_info in file_list:
+    adapter = detect_adapter(file_info["path"])
+    yield from adapter.stream(file_info["path"], file_info["source_dataset"])
+
+
+def mix(
+  input_dir: str,
+  output_path: str,
+  dry_run: bool = False,
+  batch_size: int = 10_000,
+) -> dict[str, Any]:
+  """Run the full mixing pipeline.
+
+  Args:
+      input_dir: Directory containing dataset subdirectories.
+      output_path: Path for the output Parquet file.
+      dry_run: If True, count records per source without writing output.
+      batch_size: Number of records per write batch (controls memory usage).
+
+  Returns:
+      Summary dict with keys: total_records, sources (dict of source -> count),
+      output_path (None if dry_run).
+  """
+  file_list = discover_files(input_dir)
+  sources: dict[str, int] = {}
+  tasks: dict[str, int] = {}
+  total = 0
+
+  def _track(record: dict[str, Any]) -> None:
+    nonlocal total
+    src = record.get("source_dataset", "unknown")
+    sources[src] = sources.get(src, 0) + 1
+    task = record.get("task")
+    if task is not None:
+      tasks[task] = tasks.get(task, 0) + 1
+    total += 1
+
+  if dry_run:
+    for record in stream_all(input_dir, file_list):
+      _track(record)
+    return {
+      "total_records": total,
+      "sources": sources,
+      "tasks": tasks,
+      "output_path": None,
+    }
+
+  # Stream records into batches and write to Parquet
+  writer: pq.ParquetWriter | None = None
+  batch: list[dict[str, Any]] = []
+
+  try:
+    for record in stream_all(input_dir, file_list):
+      batch.append(record)
+      _track(record)
+
+      if len(batch) >= batch_size:
+        table = pa.Table.from_pylist(batch, schema=OUTPUT_SCHEMA)
+        if writer is None:
+          writer = pq.ParquetWriter(output_path, OUTPUT_SCHEMA)
+        writer.write_table(table)
+        batch = []
+
+    # Write remaining records
+    if batch:
+      table = pa.Table.from_pylist(batch, schema=OUTPUT_SCHEMA)
+      if writer is None:
+        writer = pq.ParquetWriter(output_path, OUTPUT_SCHEMA)
+      writer.write_table(table)
+  finally:
+    if writer is not None:
+      writer.close()
+
+  # Verify output
+  if total > 0:
+    output_file = pq.ParquetFile(output_path)
+
+    # Record count verification
+    output_rows = output_file.metadata.num_rows
+    if output_rows != total:
+      raise RuntimeError(
+        f"Record count mismatch: wrote {total} records but output "
+        f"has {output_rows} rows"
+      )
+
+    # Schema conformance check
+    output_schema = output_file.schema_arrow
+    if output_schema != OUTPUT_SCHEMA:
+      missing = set(OUTPUT_SCHEMA.names) - set(output_schema.names)
+      extra = set(output_schema.names) - set(OUTPUT_SCHEMA.names)
+      type_mismatches = []
+      for field in OUTPUT_SCHEMA:
+        if field.name in output_schema.names:
+          out_field = output_schema.field(field.name)
+          if out_field.type != field.type:
+            type_mismatches.append(
+              f"  {field.name}: expected {field.type}, got {out_field.type}"
+            )
+      parts = ["Schema conformance check failed:"]
+      if missing:
+        parts.append(f"  Missing columns: {missing}")
+      if extra:
+        parts.append(f"  Extra columns: {extra}")
+      if type_mismatches:
+        parts.append("  Type mismatches:")
+        parts.extend(type_mismatches)
+      raise RuntimeError("\n".join(parts))
+
+  return {
+    "total_records": total,
+    "sources": sources,
+    "tasks": tasks,
+    "output_path": output_path,
+  }

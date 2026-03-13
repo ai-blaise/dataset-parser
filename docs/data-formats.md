@@ -9,6 +9,7 @@ The `scripts/data_formats/` module provides a unified interface for loading data
 | JSONL | `.jsonl` | One JSON object per line | Streaming (O(1)) |
 | JSON | `.json` | JSON array of objects | Full parse required |
 | Parquet | `.parquet`, `.pq` | Apache Parquet columnar | Row group batches |
+| CSV | `.csv` | Comma-separated values | Streaming (O(1)) |
 
 ## Quick Start
 
@@ -128,6 +129,26 @@ for record in loader.load("data.parquet"):
     messages = record["conversations"]  # Properly converted to Python list
 ```
 
+### CSV Loader
+
+Streams rows via `csv.DictReader`. The field size limit is raised at module load to handle very large fields (e.g. completions up to 124K characters from the Raiden Speciale dataset).
+
+```python
+from scripts.data_formats import CSVLoader
+
+loader = CSVLoader()
+
+# Stream records (O(1) memory)
+for record in loader.load("data.csv"):
+    print(record["prompt"], record["completion"])
+
+# Get record count (line count minus header)
+count = loader.get_record_count("data.csv")
+
+# Random access (streams to index)
+record = loader.get_record_at_index("data.csv", 42)
+```
+
 ## Schema Normalization
 
 Different formats use different field names. The normalizer provides a consistent interface:
@@ -203,6 +224,7 @@ from scripts.data_formats import (
     SUPPORTED_FORMATS,
 
     # Loaders
+    CSVLoader,
     JSONLLoader,
     JSONLoader,
     ParquetLoader,
@@ -241,6 +263,12 @@ from scripts.data_formats import (
 **JSON:**
 - Must parse entire file into memory
 - Best for smaller datasets or exports
+
+**CSV:**
+- Streaming: One row in memory at a time via `csv.DictReader`
+- Count: Single pass (line count minus header)
+- Random access: Must stream to index
+- Field size limit raised to handle large fields (124K+ chars)
 
 **Parquet:**
 - Record count from file metadata (instant)

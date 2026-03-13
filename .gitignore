@@ -1,10 +1,57 @@
+# Developer tools
 .beads
 .claude
 .opencode
 .ruff_cache
 
 ./dataset/
+datasets/
+dataset-analysis/
 nemotron/
 parsed_datasets/
+
+# Python bytecode
 __pycache__/
 *.pyc
+*.pyo
+*.pyd
+
+# Python build/dist
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Testing
+.pytest_cache/
+.tox/
+.nox/
+coverage/
+htmlcov/
+
+# Coverage
+.coverage
+.coveragerc
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Temporary
+*.tmp
+*.log
+*.lock
+
+# Python version (machine-specific)
+.python-version
