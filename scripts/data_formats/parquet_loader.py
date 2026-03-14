@@ -178,11 +178,36 @@ class ParquetLoader(DataLoader):
         parquet_file = pq.ParquetFile(filename)
         return parquet_file.metadata.num_rows
 
+    def _find_row_group(
+        self, parquet_file: pq.ParquetFile, index: int
+    ) -> tuple[int, int]:
+        """Find the row group and local offset for a global row index.
+
+        Uses row group metadata for O(1) seeking instead of scanning batches.
+
+        Args:
+            parquet_file: An open ParquetFile.
+            index: The global row index.
+
+        Returns:
+            A tuple of (row_group_index, local_offset_within_group).
+
+        Raises:
+            IndexError: If the index is out of range.
+        """
+        cumulative = 0
+        for rg_idx in range(parquet_file.metadata.num_row_groups):
+            rg_rows = parquet_file.metadata.row_group(rg_idx).num_rows
+            if cumulative + rg_rows > index:
+                return rg_idx, index - cumulative
+            cumulative += rg_rows
+        raise IndexError(f"Record index {index} out of range")
+
     def get_record_at_index(self, filename: str, index: int) -> dict[str, Any]:
         """Get a specific record by index.
 
-        For Parquet files, this uses row group information to efficiently
-        seek to the correct position.
+        Uses row group metadata to jump directly to the correct row group,
+        avoiding sequential scanning of the entire file.
 
         Args:
             filename: Path to the Parquet file.
@@ -209,17 +234,68 @@ class ParquetLoader(DataLoader):
         if index >= total_rows:
             raise IndexError(f"Record index {index} out of range (0-{total_rows - 1})")
 
-        # Use iter_batches with explicit batch_size to avoid
-        # ArrowNotImplementedError with nested struct columns
-        current_row = 0
-        for batch in parquet_file.iter_batches(batch_size=1024):
-            batch_rows = batch.num_rows
-            if current_row + batch_rows > index:
-                local_index = index - current_row
-                batch_dict = batch.to_pydict()
-                row = {key: values[local_index] for key, values in batch_dict.items()}
-                return _row_to_dict(row)
-            current_row += batch_rows
+        rg_idx, local_offset = self._find_row_group(parquet_file, index)
+        table = parquet_file.read_row_group(rg_idx)
+        row = table.slice(local_offset, 1).to_pydict()
+        return _row_to_dict({key: values[0] for key, values in row.items()})
 
-        # Should not reach here if metadata is accurate
-        raise IndexError(f"Record index {index} out of range")
+    def get_records_range(
+        self, filename: str, start: int, count: int
+    ) -> list[dict[str, Any]]:
+        """Load a range of records efficiently using row group metadata.
+
+        Reads only the row groups that overlap with the requested range,
+        avoiding full-file scans.
+
+        Args:
+            filename: Path to the Parquet file.
+            start: The starting row index (0-based).
+            count: Number of records to load.
+
+        Returns:
+            A list of records as dictionaries.
+
+        Raises:
+            FileNotFoundError: If the file does not exist.
+            IndexError: If start is out of range.
+        """
+        if start < 0:
+            raise IndexError(f"Start index {start} cannot be negative")
+
+        parquet_file = pq.ParquetFile(filename)
+        total_rows = parquet_file.metadata.num_rows
+
+        if start >= total_rows:
+            raise IndexError(f"Start index {start} out of range (0-{total_rows - 1})")
+
+        end = min(start + count, total_rows)
+        records: list[dict[str, Any]] = []
+
+        # Find which row groups overlap with [start, end)
+        cumulative = 0
+        for rg_idx in range(parquet_file.metadata.num_row_groups):
+            rg_rows = parquet_file.metadata.row_group(rg_idx).num_rows
+            rg_start = cumulative
+            rg_end = cumulative + rg_rows
+
+            if rg_end <= start:
+                cumulative += rg_rows
+                continue
+            if rg_start >= end:
+                break
+
+            # This row group overlaps — read it
+            table = parquet_file.read_row_group(rg_idx)
+            local_start = max(0, start - rg_start)
+            local_end = min(rg_rows, end - rg_start)
+            slice_table = table.slice(local_start, local_end - local_start)
+            batch_dict = slice_table.to_pydict()
+
+            num_rows = local_end - local_start
+            for i in range(num_rows):
+                row = {key: values[i] for key, values in batch_dict.items()}
+                records.append(_row_to_dict(row))
+
+            cumulative += rg_rows
+
+        return records

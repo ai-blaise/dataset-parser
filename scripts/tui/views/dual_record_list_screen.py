@@ -23,7 +23,9 @@ from scripts.tui.data_loader import (
     get_record_count,
     get_record_summary,
     load_all_records,
+    load_record_at_index,
     load_records,
+    load_records_range,
 )
 from scripts.tui.mixins import (
     BackgroundTaskMixin,
@@ -32,6 +34,10 @@ from scripts.tui.mixins import (
     VimNavigationMixin,
 )
 from scripts.tui.widgets.json_tree_panel import JsonTreePanel
+
+
+# Number of records per page in lazy mode
+PAGE_SIZE = 200
 
 
 class PaneState(Enum):
@@ -90,8 +96,13 @@ class DualRecordListScreen(
     Footer { dock: bottom; }
     """
 
-    # All dual-pane bindings (vim navigation + panel switching)
-    BINDINGS = DualPaneMixin.DUAL_PANE_BINDINGS
+    # All dual-pane bindings (vim navigation + panel switching) + pagination
+    BINDINGS = DualPaneMixin.DUAL_PANE_BINDINGS + [
+        Binding("n", "next_page", "Next Page", show=True),
+        Binding("p", "prev_page", "Prev Page", show=True),
+        Binding("g", "first_page", "First Page", show=False),
+        Binding("G", "last_page", "Last Page", show=False),
+    ]
 
     def __init__(
         self,
@@ -112,6 +123,10 @@ class DualRecordListScreen(
         self._left_records: list[dict[str, Any]] = []
         self._left_selected_index: int | None = None
         self._left_selected_record: dict[str, Any] | None = None
+        self._left_lazy: bool = False
+        self._left_total_count: int = 0
+        self._left_page: int = 0
+        self._left_page_records: list[dict[str, Any]] = []
 
         # Right pane state
         self._right_state: PaneState = PaneState.FILE_LIST
@@ -120,6 +135,10 @@ class DualRecordListScreen(
         self._right_records: list[dict[str, Any]] = []
         self._right_selected_index: int | None = None
         self._right_selected_record: dict[str, Any] | None = None
+        self._right_lazy: bool = False
+        self._right_total_count: int = 0
+        self._right_page: int = 0
+        self._right_page_records: list[dict[str, Any]] = []
 
         # Track which side is currently loading (for async callback)
         self._loading_side: str = "left"
@@ -236,10 +255,22 @@ class DualRecordListScreen(
                 else self._right_selected_file
             )
             file_basename = os.path.basename(selected_file) if selected_file else "?"
-            records = self._left_records if side == "left" else self._right_records
-            header.update(
-                f"{side.capitalize()}: {file_basename} [{len(records)} records]"
-            )
+            if self._is_pane_lazy(side):
+                total = (
+                    self._left_total_count if side == "left"
+                    else self._right_total_count
+                )
+                page = self._get_pane_page(side) + 1
+                total_pages = self._pane_total_pages(side)
+                header.update(
+                    f"{side.capitalize()}: {file_basename}"
+                    f" [{total:,} records | page {page}/{total_pages}]"
+                )
+            else:
+                records = self._left_records if side == "left" else self._right_records
+                header.update(
+                    f"{side.capitalize()}: {file_basename} [{len(records)} records]"
+                )
         else:  # JSON_VIEW
             tree.display = True
             selected_file = (
@@ -282,36 +313,54 @@ class DualRecordListScreen(
             self._handle_record_selected("right", event)
 
     def _handle_file_selected(self, side: str, event: DataTable.RowSelected) -> None:
-        """Handle file selection - transition to RECORD_LIST."""
+        """Handle file selection - transition to RECORD_LIST.
+
+        Uses lazy paginated mode for large files to avoid OOM.
+        """
         import os
 
         file_path = str(event.row_key.value)
         file_basename = os.path.basename(file_path)
 
-        # Store the selected file path and side for use in callbacks
+        # Store the selected file path
         if side == "left":
             self._left_selected_file = file_path
         else:
             self._right_selected_file = file_path
 
-        # Store which side is loading for the callback
         self._loading_side = side
 
-        # Check file size and use async loading for large files
         if self.should_load_async(file_path):
-            # Large file - use async loading with progress
-            # Get total count for progress display
+            # Large file — try lazy paginated mode
             try:
                 total = get_record_count(file_path)
             except Exception:
                 total = None
-            self._run_loading_task(
-                filename=file_basename,
-                load_fn=lambda: load_records(file_path),
-                on_complete=self._on_pane_records_loaded,
-                on_error=self._on_pane_loading_error,
-                total_count=total,
-            )
+
+            if total is not None and total > 0:
+                # Lazy mode: store count, load first page
+                if side == "left":
+                    self._left_lazy = True
+                    self._left_total_count = total
+                    self._left_page = 0
+                    self._left_state = PaneState.RECORD_LIST
+                else:
+                    self._right_lazy = True
+                    self._right_total_count = total
+                    self._right_page = 0
+                    self._right_state = PaneState.RECORD_LIST
+
+                self._load_pane_page(side, 0)
+                self.notify(f"{total:,} records (lazy mode)")
+            else:
+                # Fallback: stream-load with progress
+                self._run_loading_task(
+                    filename=file_basename,
+                    load_fn=lambda: load_records(file_path),
+                    on_complete=self._on_pane_records_loaded,
+                    on_error=self._on_pane_loading_error,
+                    total_count=total,
+                )
         else:
             # Small file - load synchronously
             try:
@@ -370,6 +419,105 @@ class DualRecordListScreen(
         """Called when async loading fails for a pane."""
         self.notify(f"Error loading: {error}", severity="error")
 
+    def _load_pane_page(self, side: str, page: int) -> None:
+        """Load a page of records for the given pane in lazy mode."""
+        selected_file = (
+            self._left_selected_file if side == "left" else self._right_selected_file
+        )
+        total_count = (
+            self._left_total_count if side == "left" else self._right_total_count
+        )
+        if not selected_file:
+            return
+
+        total_pages = self._pane_total_pages(side)
+        page = max(0, min(page, total_pages - 1))
+        start = page * PAGE_SIZE
+
+        page_records = load_records_range(selected_file, start, PAGE_SIZE)
+
+        if side == "left":
+            self._left_page = page
+            self._left_page_records = page_records
+            self._left_state = PaneState.RECORD_LIST
+        else:
+            self._right_page = page
+            self._right_page_records = page_records
+            self._right_state = PaneState.RECORD_LIST
+
+        # Populate the record table with this page
+        table = self.query_one(f"#{side}-record-table", DataTable)
+        mapping = get_field_mapping(selected_file) if selected_file else FieldMapping()
+
+        # Clear and re-setup columns
+        table.clear(columns=True)
+        columns = self._get_record_columns(mapping)
+        self._configure_table(table, columns)
+
+        for local_idx, record in enumerate(page_records):
+            global_idx = start + local_idx
+            summary = get_record_summary(record, global_idx, mapping)
+            row = self._build_record_row(summary, mapping)
+            table.add_row(*row, key=str(global_idx))
+
+        self._refresh_pane(side)
+        self._focus_active_widget()
+
+    def _pane_total_pages(self, side: str) -> int:
+        """Get total page count for a pane in lazy mode."""
+        total = self._left_total_count if side == "left" else self._right_total_count
+        if total <= 0:
+            return 1
+        return (total + PAGE_SIZE - 1) // PAGE_SIZE
+
+    def _is_pane_lazy(self, side: str) -> bool:
+        """Check if a pane is in lazy mode."""
+        return self._left_lazy if side == "left" else self._right_lazy
+
+    def _get_pane_page(self, side: str) -> int:
+        """Get the current page for a pane."""
+        return self._left_page if side == "left" else self._right_page
+
+    def action_next_page(self) -> None:
+        """Go to next page on the active pane."""
+        side = self._active_panel
+        state = self._left_state if side == "left" else self._right_state
+        if state != PaneState.RECORD_LIST or not self._is_pane_lazy(side):
+            return
+        page = self._get_pane_page(side)
+        if page < self._pane_total_pages(side) - 1:
+            self._load_pane_page(side, page + 1)
+        else:
+            self.notify("Already on last page")
+
+    def action_prev_page(self) -> None:
+        """Go to previous page on the active pane."""
+        side = self._active_panel
+        state = self._left_state if side == "left" else self._right_state
+        if state != PaneState.RECORD_LIST or not self._is_pane_lazy(side):
+            return
+        page = self._get_pane_page(side)
+        if page > 0:
+            self._load_pane_page(side, page - 1)
+        else:
+            self.notify("Already on first page")
+
+    def action_first_page(self) -> None:
+        """Jump to first page on the active pane."""
+        side = self._active_panel
+        state = self._left_state if side == "left" else self._right_state
+        if state != PaneState.RECORD_LIST or not self._is_pane_lazy(side):
+            return
+        self._load_pane_page(side, 0)
+
+    def action_last_page(self) -> None:
+        """Jump to last page on the active pane."""
+        side = self._active_panel
+        state = self._left_state if side == "left" else self._right_state
+        if state != PaneState.RECORD_LIST or not self._is_pane_lazy(side):
+            return
+        self._load_pane_page(side, self._pane_total_pages(side) - 1)
+
     def _handle_record_selected(self, side: str, event: DataTable.RowSelected) -> None:
         """Handle record selection - transition to JSON_VIEW."""
         row_key = event.row_key
@@ -377,23 +525,40 @@ class DualRecordListScreen(
             return
 
         try:
-            idx = int(row_key.value)
+            global_idx = int(row_key.value)
         except (ValueError, TypeError, AttributeError):
             return
 
-        records = self._left_records if side == "left" else self._right_records
-        if idx < 0 or idx >= len(records):
-            return
-
-        record = records[idx]
+        # Get the record — from page records (lazy) or full records (eager)
+        if self._is_pane_lazy(side):
+            page_records = (
+                self._left_page_records if side == "left"
+                else self._right_page_records
+            )
+            page = self._get_pane_page(side)
+            page_start = page * PAGE_SIZE
+            local_idx = global_idx - page_start
+            if 0 <= local_idx < len(page_records):
+                record = page_records[local_idx]
+            else:
+                selected_file = (
+                    self._left_selected_file if side == "left"
+                    else self._right_selected_file
+                )
+                record = load_record_at_index(selected_file, global_idx)
+        else:
+            records = self._left_records if side == "left" else self._right_records
+            if global_idx < 0 or global_idx >= len(records):
+                return
+            record = records[global_idx]
 
         # Update state for this pane only
         if side == "left":
-            self._left_selected_index = idx
+            self._left_selected_index = global_idx
             self._left_selected_record = record
             self._left_state = PaneState.JSON_VIEW
         else:
-            self._right_selected_index = idx
+            self._right_selected_index = global_idx
             self._right_selected_record = record
             self._right_state = PaneState.JSON_VIEW
 
@@ -411,9 +576,9 @@ class DualRecordListScreen(
         elif "example_id" in record:
             id_value = str(record["example_id"])
         else:
-            id_value = f"idx:{idx}"
+            id_value = f"idx:{global_idx}"
 
-        tree.load_json(record, label=f"Record {idx} ({id_value})")
+        tree.load_json(record, label=f"Record {global_idx} ({id_value})")
 
         self._refresh_pane(side)
         self._focus_active_widget()
@@ -439,10 +604,16 @@ class DualRecordListScreen(
                 self._left_state = PaneState.FILE_LIST
                 self._left_selected_file = None
                 self._left_records = []
+                self._left_lazy = False
+                self._left_total_count = 0
+                self._left_page_records = []
             else:
                 self._right_state = PaneState.FILE_LIST
                 self._right_selected_file = None
                 self._right_records = []
+                self._right_lazy = False
+                self._right_total_count = 0
+                self._right_page_records = []
             self._refresh_pane(side)
             self._focus_active_widget()
         else:

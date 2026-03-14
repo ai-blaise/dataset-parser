@@ -470,6 +470,55 @@ def load_all_records(
     return records
 
 
+def load_records_range(
+    filename: str,
+    start: int,
+    count: int,
+    normalize: bool = True,
+) -> list[dict[str, Any]]:
+    """Load a range of records efficiently without loading the entire file.
+
+    For Parquet files, this uses row-group metadata to seek directly.
+    For other formats, falls back to streaming and skipping.
+
+    Args:
+        filename: Path to the data file.
+        start: Starting record index (0-based).
+        count: Number of records to load.
+        normalize: Whether to normalize records to standard schema.
+
+    Returns:
+        A list of records in the requested range.
+    """
+    loader = get_loader(filename)
+
+    # Fast path for Parquet: use row-group-aware range read
+    from scripts.data_formats.parquet_loader import ParquetLoader
+
+    if isinstance(loader, ParquetLoader):
+        records = loader.get_records_range(filename, start, count)
+        if normalize:
+            from scripts.data_formats import normalize_record
+
+            records = [normalize_record(r, loader.format_name) for r in records]
+        # Detect schema from first record if not cached
+        if records and filename not in _schema_cache:
+            set_schema_cache(filename, detect_schema(records[0]))
+        return records
+
+    # Fallback for other formats: stream and skip
+    records: list[dict[str, Any]] = []
+    for i, record in enumerate(load_records(filename, normalize=normalize)):
+        if i < start:
+            continue
+        if i >= start + count:
+            break
+        records.append(record)
+        if not records or (len(records) == 1 and filename not in _schema_cache):
+            set_schema_cache(filename, detect_schema(record))
+    return records
+
+
 def load_record_at_index(
     filename: str, index: int, normalize: bool = True
 ) -> dict[str, Any]:
@@ -498,7 +547,19 @@ def load_record_at_index(
             raise IndexError(f"Record index {index} out of range (0-{len(cached) - 1})")
         return cached[index]
 
-    # Fall back to streaming read using format-aware loader
+    # Fast path for Parquet: use row-group-aware random access
+    loader = get_loader(filename)
+    from scripts.data_formats.parquet_loader import ParquetLoader
+
+    if isinstance(loader, ParquetLoader):
+        record = loader.get_record_at_index(filename, index)
+        if normalize:
+            from scripts.data_formats import normalize_record
+
+            record = normalize_record(record, loader.format_name)
+        return record
+
+    # Fall back to streaming read for other formats
     for i, record in enumerate(load_records(filename, normalize=normalize)):
         if i == index:
             return record

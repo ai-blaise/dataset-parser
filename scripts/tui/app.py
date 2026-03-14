@@ -261,7 +261,12 @@ class JsonComparisonApp(BackgroundTaskMixin, App):
         self.push_screen(FileListScreen(self._path, files))
 
     def _load_single_file(self, filepath: str) -> None:
-        """Load a single file and show record list."""
+        """Load a single file and show record list.
+
+        Uses three strategies based on file size:
+        - Small files (<100MB): Eager synchronous load
+        - Large files (>=100MB): Lazy paginated mode (parquet metadata only)
+        """
         self.filename = filepath
         self._current_file = filepath
 
@@ -270,28 +275,38 @@ class JsonComparisonApp(BackgroundTaskMixin, App):
             self._file_format = detect_format(filepath)
         except ValueError as e:
             self.notify(f"Unsupported file format: {e}", severity="error")
-            return  # Don't push screen if format detection fails
+            return
 
-        # Update title to show format
         basename = os.path.basename(filepath)
         self.title = f"Dataset Viewer - {basename} ({self._file_format})"
 
-        # Check file size to decide loading strategy
         if self.should_load_async(filepath):
-            # Large file - use async loading with progress
-            self._loading = True
-            # Get total count for progress display
+            # Large file — use lazy paginated mode (no full load)
             try:
                 total = get_record_count(filepath)
             except Exception:
                 total = None
-            self._run_loading_task(
-                filename=basename,
-                load_fn=lambda: load_records(filepath),
-                on_complete=self._on_records_loaded,
-                on_error=self._on_loading_error,
-                total_count=total,
-            )
+
+            if total is not None and total > 0:
+                self._loading = False
+                # Push paginated record list immediately — no data loaded yet
+                if total == 1:
+                    self.push_screen(ComparisonScreen(filepath, 0))
+                else:
+                    self.push_screen(
+                        RecordListScreen(filename=filepath, total_count=total)
+                    )
+                self.notify(f"{total:,} records (lazy mode)")
+            else:
+                # Fallback: can't get count, stream-load with progress
+                self._loading = True
+                self._run_loading_task(
+                    filename=basename,
+                    load_fn=lambda: load_records(filepath),
+                    on_complete=self._on_records_loaded,
+                    on_error=self._on_loading_error,
+                    total_count=total,
+                )
         else:
             # Small file - load synchronously
             try:

@@ -115,9 +115,12 @@ class ComparisonScreen(ExportMixin, DualPaneMixin, VimNavigationMixin, Screen):
         If the record doesn't have a standard messages field, falls back
         to "raw mode" showing the original record on both sides without
         processing. This handles non-standard schemas gracefully.
+
+        Supports both eager mode (cached records) and lazy mode (on-demand
+        loading via parquet random access).
         """
         try:
-            # Use cached records from app if available
+            # Use cached records from app if available (eager mode)
             cached_records = None
             if hasattr(self.app, "records") and self.app.records:
                 cached_records = self.app.records
