@@ -104,12 +104,13 @@ class ParquetLoader(DataLoader):
         # Read the parquet file
         parquet_file = pq.ParquetFile(filename)
 
-        # Iterate through row groups for memory efficiency
-        for batch in parquet_file.iter_batches():
+        # Use explicit batch_size to avoid ArrowNotImplementedError
+        # with nested struct columns (default reads entire row group)
+        for batch in parquet_file.iter_batches(batch_size=1024):
             # Convert batch to Python dictionaries
             batch_dict = batch.to_pydict()
 
-            # Get number of rows in this batch
+            # Get number of rows in this row group
             num_rows = len(next(iter(batch_dict.values()))) if batch_dict else 0
 
             # Yield each row as a dictionary
@@ -208,22 +209,17 @@ class ParquetLoader(DataLoader):
         if index >= total_rows:
             raise IndexError(f"Record index {index} out of range (0-{total_rows - 1})")
 
-        # Find the row group containing the index
+        # Use iter_batches with explicit batch_size to avoid
+        # ArrowNotImplementedError with nested struct columns
         current_row = 0
-        for rg_idx in range(parquet_file.metadata.num_row_groups):
-            rg_num_rows = parquet_file.metadata.row_group(rg_idx).num_rows
-
-            if current_row + rg_num_rows > index:
-                # This row group contains our target index
-                row_group = parquet_file.read_row_group(rg_idx)
+        for batch in parquet_file.iter_batches(batch_size=1024):
+            batch_rows = batch.num_rows
+            if current_row + batch_rows > index:
                 local_index = index - current_row
-
-                # Convert to dict and get the specific row
-                batch_dict = row_group.to_pydict()
+                batch_dict = batch.to_pydict()
                 row = {key: values[local_index] for key, values in batch_dict.items()}
                 return _row_to_dict(row)
-
-            current_row += rg_num_rows
+            current_row += batch_rows
 
         # Should not reach here if metadata is accurate
         raise IndexError(f"Record index {index} out of range")

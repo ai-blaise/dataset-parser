@@ -143,11 +143,10 @@ def detect_adapter(filename: str) -> BaseAdapter:
     return PromptCompletionCSVAdapter()
 
   if fmt == "parquet":
-    loader = ParquetLoader()
-    for record in loader.load(filename):
-      if "conversations" in record:
-        return NemotronAdapter()
-      break
+    import pyarrow.parquet as pq
+    schema = pq.read_schema(filename)
+    if "conversations" in schema.names:
+      return NemotronAdapter()
     raise ValueError(f"Parquet file '{filename}' has no 'conversations' column")
 
   if fmt in ("jsonl", "json"):

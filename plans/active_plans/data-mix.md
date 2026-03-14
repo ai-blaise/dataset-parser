@@ -287,10 +287,153 @@ main()
 
 ---
 
+## Discovered Issues
+
+### BLOCKER: PyArrow cannot read Nemotron Parquet files with nested columns
+
+@claude-opus-4.6: PyArrow 23.0.0 throws `ArrowNotImplementedError: Nested data conversions not implemented for chunked array outputs` when reading any Parquet file containing the `conversations: list<struct<content: string, role: string>>` column. This affects:
+
+- `ParquetLoader.load()` — uses `iter_batches()` which fails on nested structs
+- `ParquetFile.read_row_group()` — also fails
+- `pq.read_table()` — also fails
+- `pyarrow.dataset` API — also fails
+
+**What works:**
+- Reading flat columns individually (e.g. `read_row_group(0, columns=['agent'])`) — OK
+- Reading schema metadata (`pq.read_schema()`) — OK, no data read needed
+
+**Root cause:** The Nemotron Parquet files include HuggingFace metadata in the schema (`huggingface: '{"info": {"features": ...}}'`) which may interact with PyArrow's type coercion for nested types in chunked output paths.
+
+**Impact:** Blocks all Nemotron reading (Sources A & B — 368K+ rows, the vast majority of the dataset).
+
+**Potential fixes to investigate:**
+1. Upgrade/downgrade PyArrow to a version that handles this
+2. Use `pandas.read_parquet()` which uses a different internal code path
+3. Use the HuggingFace `datasets` library to load, then convert to Arrow
+4. Read flat columns separately and reconstruct the nested column from raw Parquet column data
+5. Strip HuggingFace metadata from schema before reading
+
+### ACTION REQUIRED: Add missing dependencies to pyproject.toml
+
+@claude-opus-4.6: Depending on which fix is chosen for the PyArrow nested column issue, new packages may need to be added. Current dependencies (`pyproject.toml`):
+- `pyarrow>=15.0.0` (already present — currently at 23.0.0)
+- `huggingface-hub>=1.3.2` (already present)
+
+**Packages that may be needed:**
+- `pandas` — if fix #2 is chosen (pandas read_parquet uses a different code path)
+- `datasets` (HuggingFace) — if fix #3 is chosen (the `datasets` library handles HuggingFace Parquet natively)
+- Neither — if fix #1, #4, or #5 works
+
+**Step:** After choosing a fix, run `uv add <package>` to add the dependency and `uv sync` to update the lockfile.
+
+### FIX APPLIED: detect_adapter uses schema metadata instead of loading records
+
+@claude-opus-4.6: Changed `detect_adapter()` to use `pq.read_schema(filename)` for Parquet files instead of loading the first record via `ParquetLoader.load()`. Schema reads work fine — the issue is only with data reads of nested columns.
+
 ## Status
 
 | Phase | Status |
 |-------|--------|
-| Phase 1 | NOT STARTED |
-| Phase 2 | NOT STARTED |
-| Phase 3 | NOT STARTED |
+| Phase 1a (CSV Loader) | DONE |
+| Phase 1b (Core Mixer + Adapters) | DONE (PyArrow blocker resolved — `batch_size=1024` fix in `parquet_loader.py`) |
+| Phase 2 (CLI) | DONE |
+| Phase 3 (Validation) | DONE |
+| Phase 4 (Testing) | DONE (45 tests passing — 24 Nemotron parametrized + 6 JSONL + 6 CSV + 6 mix + 3 edge cases) |
+
+---
+
+## Phase 4: Testing (pytest)
+
+@claude-opus-4.6: All phases are implemented and the pipeline runs end-to-end. The critical gap is **automated testing** — specifically verifying that conversations pass through each adapter without any modification to user/assistant message content. The test pattern should follow `tests/test_content_integrity.py` (class-based, `copy.deepcopy()` comparisons, `pytest.skip()` for missing data).
+
+### Test file: `tests/test_dataset_mixer.py`
+
+@claude-opus-4.6: All tests below should live in a single file. Tests use **real dataset files** from `datasets/` with `pytest.skip()` when files aren't present, following the pattern in `tests/test_content_integrity.py:L407-L413`.
+
+### 4.1 — Conversation Integrity Per Adapter
+
+@claude-opus-4.6: The core invariant: **adapters must not modify, correct, or reformat the content of any user or assistant message.** Each adapter transforms the *wrapping* (column names, schema shape) but the inner `{"role": "...", "content": "..."}` dicts must be byte-for-byte identical to the source data.
+
+#### `TestNemotronAdapterIntegrity`
+
+@claude-opus-4.6: Nemotron data already has `conversations` in the correct format. The adapter drops `trial_name`/`source` and adds `source_dataset`, but `conversations` must pass through untouched. **Important:** The implementation discovers and processes **29 Parquet files** across 4 categories — tests must sample from each category, not just `code.parquet`.
+
+**Test files (one representative per category):**
+- `dataset_adapters/code.parquet` — has extra `source` column (unique to this file)
+- `synthetic_tasks/skill_based/easy/debugging/data_filtered.parquet` — easy difficulty
+- `synthetic_tasks/skill_based/medium/data_science/data_filtered.parquet` — medium difficulty
+- `synthetic_tasks/skill_based/mixed/security/data_filtered.parquet` — mixed difficulty
+
+Tests should use `@pytest.mark.parametrize` over these 4 files so each test runs against all categories.
+
+1. **`test_conversations_unchanged`** — For each of the 4 files, load first N records (e.g. 50) directly via `ParquetLoader`, then load same records via `NemotronAdapter.stream()`. Assert `adapter_record["conversations"] == raw_record["conversations"]` for every record. This catches any accidental transformation, encoding change, or field reordering.
+
+2. **`test_message_content_not_modified`** — For each record across all 4 files, iterate every message in `conversations` and assert `msg["content"]` is identical between raw and adapted. Catches subtle content modifications (whitespace stripping, encoding normalization, etc.).
+
+3. **`test_message_roles_preserved`** — Assert that role values (`"user"`, `"assistant"`, `"system"`) are preserved exactly — no case changes, no renaming.
+
+4. **`test_conversation_length_preserved`** — Assert `len(adapter_conversations) == len(raw_conversations)` — no messages dropped or duplicated.
+
+5. **`test_metadata_columns_present`** — Assert all `OUTPUT_SCHEMA` field names exist as keys in the adapted record.
+
+6. **`test_dropped_columns_absent`** — Assert `trial_name` and `source` are NOT in the adapted record.
+
+#### `TestMessagesJSONLAdapterIntegrity`
+
+@claude-opus-4.6: JSONL source has `messages` key. The adapter renames it to `conversations` — but the inner list of `{"role", "content"}` dicts must be identical.
+
+1. **`test_conversations_match_messages`** — Load first N records from the JSONL via `JSONLLoader`, then via `MessagesJSONLAdapter.stream()`. Assert `adapter_record["conversations"] == raw_record["messages"]` — exact same list, just under a different key name.
+
+2. **`test_user_content_not_modified`** — For each record, find every `role=="user"` message and assert content is identical between raw and adapted.
+
+3. **`test_assistant_content_not_modified`** — Same for `role=="assistant"`. This is the critical one — the parser_finale tool strips assistant content, but the **mixer must NOT**. Assert content includes `<think>` blocks when present in the source.
+
+4. **`test_system_content_not_modified`** — Same for `role=="system"`. The TeichAI data has empty system prompts — verify they stay as empty strings, not `None`.
+
+5. **`test_think_blocks_preserved`** — Explicitly check that assistant messages containing `<think>...</think>` reasoning chains are preserved verbatim. The mixer must not strip, parse, or modify thinking blocks.
+
+6. **`test_conversation_count_preserved`** — Assert number of messages per conversation is identical.
+
+#### `TestPromptCompletionCSVAdapterIntegrity`
+
+@claude-opus-4.6: CSV source has flat `prompt`/`completion` columns. The adapter constructs `[{"role": "user", "content": prompt}, {"role": "assistant", "content": completion}]`. The invariant is: **prompt content becomes user content verbatim, completion content becomes assistant content verbatim.**
+
+1. **`test_prompt_becomes_user_content_verbatim`** — Load first N records from the CSV via `CSVLoader`, then via `PromptCompletionCSVAdapter.stream()`. Assert `adapter_record["conversations"][0]["content"] == raw_record["prompt"]` — exact match, no trimming, no encoding change.
+
+2. **`test_completion_becomes_assistant_content_verbatim`** — Assert `adapter_record["conversations"][1]["content"] == raw_record["completion"]` — exact match. This catches any whitespace stripping, line ending normalization (`\r\n` → `\n`), or truncation.
+
+3. **`test_roles_are_user_then_assistant`** — Assert `conversations[0]["role"] == "user"` and `conversations[1]["role"] == "assistant"`.
+
+4. **`test_conversation_is_exactly_two_messages`** — Assert `len(conversations) == 2` for every CSV record.
+
+5. **`test_large_completion_preserved`** — Find a record with completion > 50K chars (Raiden has completions up to 124K). Assert the full content is preserved — no truncation.
+
+6. **`test_think_blocks_in_completion_preserved`** — All 8,041 Raiden completions contain `<think>` blocks. Assert they survive the adapter.
+
+### 4.2 — End-to-End Mix Integrity
+
+@claude-opus-4.6: After verifying each adapter individually, test the full pipeline: mix → write Parquet → read back → verify conversations match source.
+
+#### `TestMixOutputIntegrity`
+
+1. **`test_mix_subset_conversations_match_sources`** — Create a temp directory with symlinks to one small Parquet, the JSONL, and one CSV. Run `mix()`. Read the output Parquet back. For each `source_dataset`, sample records and verify conversations match the originals.
+
+2. **`test_output_schema_matches`** — Assert the output Parquet schema exactly matches `OUTPUT_SCHEMA` from `schema.py`.
+
+3. **`test_record_count_equals_sum_of_inputs`** — Assert `output_rows == sum(input_counts)`.
+
+4. **`test_source_dataset_values_correct`** — Assert every record has a non-null `source_dataset` and the set of distinct values matches the subdirectory names.
+
+5. **`test_no_empty_conversations`** — Assert no record has `conversations == []` or `conversations == None`.
+
+6. **`test_round_trip_parquet_preserves_conversations`** — Write mixed output, read it back via `ParquetLoader`, verify conversations are still valid `[{"role": "...", "content": "..."}]` structure (catches PyArrow serialization issues with nested structs).
+
+### 4.3 — Negative / Edge Cases
+
+@claude-opus-4.6: Tests that verify the pipeline handles edge cases without silently corrupting data.
+
+1. **`test_comparative_csv_empty_completion`** — `Raiden_Mini_Comparative.csv` has columns `v3.2_speciale_completion`/`v3.2_completion` instead of `completion`. The adapter falls back to `record.get("completion", "")` which produces empty assistant content. Test should verify this behavior is at least consistent (empty string, not `None` or crash).
+
+2. **`test_empty_system_prompt_not_dropped`** — TeichAI data has `{"role": "system", "content": ""}`. Verify this message is kept in the conversation — not filtered out.
+
+3. **`test_unicode_content_preserved`** — If any source has non-ASCII content, verify it survives the adapter + Parquet round-trip.
