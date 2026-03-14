@@ -50,21 +50,50 @@ def discover_files(input_dir: str) -> list[dict[str, str]]:
   return files
 
 
+def _filter_files(
+  file_list: list[dict[str, str]],
+  include: list[str] | None = None,
+  exclude: list[str] | None = None,
+) -> list[dict[str, str]]:
+  """Filter a file list by source_dataset name.
+
+  Args:
+      file_list: Output from discover_files().
+      include: If set, only keep files whose source_dataset is in this list.
+      exclude: If set, drop files whose source_dataset is in this list.
+
+  Returns:
+      Filtered file list.
+  """
+  if include is not None:
+    include_set = frozenset(include)
+    file_list = [f for f in file_list if f["source_dataset"] in include_set]
+  if exclude is not None:
+    exclude_set = frozenset(exclude)
+    file_list = [f for f in file_list if f["source_dataset"] not in exclude_set]
+  return file_list
+
+
 def stream_all(
   input_dir: str,
   file_list: list[dict[str, str]] | None = None,
+  include: list[str] | None = None,
+  exclude: list[str] | None = None,
 ) -> Iterator[dict[str, Any]]:
   """Stream all records from all files, transformed to the unified schema.
 
   Args:
       input_dir: Root directory (used if file_list is None).
       file_list: Optional pre-computed file list from discover_files().
+      include: If set, only process files from these source_datasets.
+      exclude: If set, skip files from these source_datasets.
 
   Yields:
       Records conforming to OUTPUT_SCHEMA.
   """
   if file_list is None:
     file_list = discover_files(input_dir)
+  file_list = _filter_files(file_list, include, exclude)
 
   for file_info in file_list:
     adapter = detect_adapter(file_info["path"])
@@ -76,6 +105,8 @@ def mix(
   output_path: str,
   dry_run: bool = False,
   batch_size: int = 10_000,
+  include: list[str] | None = None,
+  exclude: list[str] | None = None,
 ) -> dict[str, Any]:
   """Run the full mixing pipeline.
 
@@ -84,6 +115,8 @@ def mix(
       output_path: Path for the output Parquet file.
       dry_run: If True, count records per source without writing output.
       batch_size: Number of records per write batch (controls memory usage).
+      include: If set, only process files from these source_datasets.
+      exclude: If set, skip files from these source_datasets.
 
   Returns:
       Summary dict with keys: total_records, sources (dict of source -> count),
@@ -104,7 +137,7 @@ def mix(
     total += 1
 
   if dry_run:
-    for record in stream_all(input_dir, file_list):
+    for record in stream_all(input_dir, file_list, include, exclude):
       _track(record)
     return {
       "total_records": total,
@@ -118,7 +151,7 @@ def mix(
   batch: list[dict[str, Any]] = []
 
   try:
-    for record in stream_all(input_dir, file_list):
+    for record in stream_all(input_dir, file_list, include, exclude):
       batch.append(record)
       _track(record)
 

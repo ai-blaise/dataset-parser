@@ -25,7 +25,7 @@ from scripts.dataset_mixer.adapters import (
   NemotronAdapter,
   PromptCompletionCSVAdapter,
 )
-from scripts.dataset_mixer.mixer import mix
+from scripts.dataset_mixer.mixer import _filter_files, discover_files, mix
 from scripts.dataset_mixer.schema import OUTPUT_SCHEMA
 
 # ---------------------------------------------------------------------------
@@ -466,3 +466,180 @@ class TestEdgeCases:
       assert adapted["conversations"][0]["content"] == raw["prompt"]
       assert adapted["conversations"][1]["content"] == raw["completion"]
       break
+
+
+# ---------------------------------------------------------------------------
+# Phase 5: Source Filtering
+# ---------------------------------------------------------------------------
+
+class TestSourceFiltering:
+  """Tests for _filter_files() and include/exclude behavior."""
+
+  SYNTHETIC_FILES = [
+    {"path": "/data/nemotron/code.parquet", "source_dataset": "Nemotron-Terminal-Corpus"},
+    {"path": "/data/nemotron/math.parquet", "source_dataset": "Nemotron-Terminal-Corpus"},
+    {"path": "/data/nemotron/skills/easy.parquet", "source_dataset": "Nemotron-Terminal-Corpus"},
+    {"path": "/data/teichai/math.jsonl", "source_dataset": "deepseek-v3.2-speciale-openr1-math-3k"},
+    {"path": "/data/raiden/speciale.csv", "source_dataset": "Raiden-Mini-DeepSeek-V3.2-Speciale"},
+  ]
+
+  def test_no_filter_returns_all(self):
+    """No include/exclude returns the full list unchanged."""
+    result = _filter_files(self.SYNTHETIC_FILES)
+    assert result == self.SYNTHETIC_FILES
+
+  def test_include_single_source_unit(self):
+    """Include one source returns only files from that source."""
+    result = _filter_files(self.SYNTHETIC_FILES, include=["Nemotron-Terminal-Corpus"])
+    assert len(result) == 3
+    assert all(f["source_dataset"] == "Nemotron-Terminal-Corpus" for f in result)
+
+  def test_include_multiple_sources(self):
+    """Include multiple sources returns files from all named sources."""
+    result = _filter_files(
+      self.SYNTHETIC_FILES,
+      include=["Nemotron-Terminal-Corpus", "Raiden-Mini-DeepSeek-V3.2-Speciale"],
+    )
+    assert len(result) == 4
+    sources = {f["source_dataset"] for f in result}
+    assert sources == {"Nemotron-Terminal-Corpus", "Raiden-Mini-DeepSeek-V3.2-Speciale"}
+
+  def test_exclude_single_source_unit(self):
+    """Exclude one source removes only files from that source."""
+    result = _filter_files(self.SYNTHETIC_FILES, exclude=["Nemotron-Terminal-Corpus"])
+    assert len(result) == 2
+    assert all(f["source_dataset"] != "Nemotron-Terminal-Corpus" for f in result)
+
+  def test_include_and_exclude_compose_unit(self):
+    """Include narrows first, then exclude removes from that result."""
+    result = _filter_files(
+      self.SYNTHETIC_FILES,
+      include=["Nemotron-Terminal-Corpus", "Raiden-Mini-DeepSeek-V3.2-Speciale"],
+      exclude=["Raiden-Mini-DeepSeek-V3.2-Speciale"],
+    )
+    assert len(result) == 3
+    assert all(f["source_dataset"] == "Nemotron-Terminal-Corpus" for f in result)
+
+  def test_include_nonexistent_returns_empty(self):
+    """Include a nonexistent source returns an empty list."""
+    result = _filter_files(self.SYNTHETIC_FILES, include=["does-not-exist"])
+    assert result == []
+
+  def test_exclude_nonexistent_returns_all(self):
+    """Exclude a nonexistent source returns the full list."""
+    result = _filter_files(self.SYNTHETIC_FILES, exclude=["does-not-exist"])
+    assert result == self.SYNTHETIC_FILES
+
+  def test_empty_file_list(self):
+    """Filtering an empty list returns an empty list."""
+    result = _filter_files([], include=["Nemotron-Terminal-Corpus"])
+    assert result == []
+
+  # -----------------------------------------------------------------------
+  # Integration tests (real data — skip if absent)
+  # -----------------------------------------------------------------------
+
+  def test_include_single_source(self, tmp_path):
+    """Include Nemotron only — all records must have that source_dataset."""
+    if not DATASETS_DIR.exists():
+      pytest.skip("datasets/ directory not found")
+    output = str(tmp_path / "nemotron_only.parquet")
+    result = mix(
+      input_dir=str(DATASETS_DIR),
+      output_path=output,
+      dry_run=True,
+      include=["Nemotron-Terminal-Corpus"],
+    )
+    assert result["total_records"] > 0
+    assert set(result["sources"].keys()) == {"Nemotron-Terminal-Corpus"}
+
+  def test_include_nemotron_gets_both_adapters_and_synthetic(self):
+    """--include Nemotron-Terminal-Corpus must capture both dataset_adapters/ and synthetic_tasks/."""
+    if not DATASETS_DIR.exists():
+      pytest.skip("datasets/ directory not found")
+    file_list = discover_files(str(DATASETS_DIR))
+    filtered = _filter_files(file_list, include=["Nemotron-Terminal-Corpus"])
+    paths = [f["path"] for f in filtered]
+    has_adapters = any("dataset_adapters" in p for p in paths)
+    has_synthetic = any("synthetic_tasks" in p for p in paths)
+    assert has_adapters, "Filtered list missing dataset_adapters/ files"
+    assert has_synthetic, "Filtered list missing synthetic_tasks/ files"
+    assert len(filtered) >= 4, f"Expected many Nemotron files, got {len(filtered)}"
+
+  def test_exclude_single_source(self, tmp_path):
+    """Exclude Nemotron — remaining sources must be TeichAI and Raiden only."""
+    if not DATASETS_DIR.exists():
+      pytest.skip("datasets/ directory not found")
+    output = str(tmp_path / "non_nemotron.parquet")
+    result = mix(
+      input_dir=str(DATASETS_DIR),
+      output_path=output,
+      dry_run=True,
+      exclude=["Nemotron-Terminal-Corpus"],
+    )
+    assert result["total_records"] > 0
+    assert "Nemotron-Terminal-Corpus" not in result["sources"]
+    expected_sources = {
+      "deepseek-v3.2-speciale-openr1-math-3k",
+      "Raiden-Mini-DeepSeek-V3.2-Speciale",
+    }
+    assert set(result["sources"].keys()) == expected_sources
+
+  def test_exclude_record_count_matches_non_nemotron(self, tmp_path):
+    """Exclude Nemotron record count should equal TeichAI + Raiden."""
+    _skip_if_missing(TEICHAI_JSONL)
+    _skip_if_missing(RAIDEN_SPECIALE_CSV)
+    output = str(tmp_path / "non_nemotron.parquet")
+    result = mix(
+      input_dir=str(DATASETS_DIR),
+      output_path=output,
+      dry_run=True,
+      exclude=["Nemotron-Terminal-Corpus"],
+    )
+    # TeichAI has 3317 + Raiden has 8041 from Speciale CSV
+    # Raiden also has Comparative CSV which produces empty completions
+    # Total should be at least 3317 + 8041 = 11358
+    assert result["total_records"] >= 11_358
+
+  def test_no_filter_includes_all_sources(self, tmp_path):
+    """No include/exclude should process all three source_datasets."""
+    if not DATASETS_DIR.exists():
+      pytest.skip("datasets/ directory not found")
+    output = str(tmp_path / "all.parquet")
+    result = mix(
+      input_dir=str(DATASETS_DIR),
+      output_path=output,
+      dry_run=True,
+    )
+    assert "Nemotron-Terminal-Corpus" in result["sources"]
+    assert "deepseek-v3.2-speciale-openr1-math-3k" in result["sources"]
+    assert "Raiden-Mini-DeepSeek-V3.2-Speciale" in result["sources"]
+
+  def test_include_nonexistent_source_returns_zero(self, tmp_path):
+    """Include a nonexistent source — 0 records, no crash."""
+    if not DATASETS_DIR.exists():
+      pytest.skip("datasets/ directory not found")
+    output = str(tmp_path / "empty.parquet")
+    result = mix(
+      input_dir=str(DATASETS_DIR),
+      output_path=output,
+      dry_run=True,
+      include=["does-not-exist"],
+    )
+    assert result["total_records"] == 0
+    assert result["sources"] == {}
+
+  def test_include_and_exclude_compose(self, tmp_path):
+    """Include two sources then exclude one — only the remaining source survives."""
+    if not DATASETS_DIR.exists():
+      pytest.skip("datasets/ directory not found")
+    output = str(tmp_path / "composed.parquet")
+    result = mix(
+      input_dir=str(DATASETS_DIR),
+      output_path=output,
+      dry_run=True,
+      include=["Nemotron-Terminal-Corpus", "Raiden-Mini-DeepSeek-V3.2-Speciale"],
+      exclude=["Raiden-Mini-DeepSeek-V3.2-Speciale"],
+    )
+    assert result["total_records"] > 0
+    assert set(result["sources"].keys()) == {"Nemotron-Terminal-Corpus"}

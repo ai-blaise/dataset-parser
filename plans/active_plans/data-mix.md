@@ -339,6 +339,7 @@ main()
 | Phase 2 (CLI) | DONE |
 | Phase 3 (Validation) | DONE |
 | Phase 4 (Testing) | DONE (45 tests passing — 24 Nemotron parametrized + 6 JSONL + 6 CSV + 6 mix + 3 edge cases) |
+| Phase 5 (Source Filtering) | DONE (15 tests passing — 8 unit + 7 integration) |
 
 ---
 
@@ -437,3 +438,104 @@ Tests should use `@pytest.mark.parametrize` over these 4 files so each test runs
 2. **`test_empty_system_prompt_not_dropped`** — TeichAI data has `{"role": "system", "content": ""}`. Verify this message is kept in the conversation — not filtered out.
 
 3. **`test_unicode_content_preserved`** — If any source has non-ASCII content, verify it survives the adapter + Parquet round-trip.
+
+---
+
+## Phase 5: Source Filtering (`--include` / `--exclude`)
+
+@architect: Need three separate mixed outputs from one `datasets/` directory:
+1. **All data combined** — all sources, no filter
+2. **Nemotron-only** — just `Nemotron-Terminal-Corpus` (includes both `dataset_adapters/` AND `synthetic_tasks/`)
+3. **Non-Nemotron** — everything except `Nemotron-Terminal-Corpus` (TeichAI + Raiden)
+
+@claude-opus-4.6: The `source_dataset` value for all Nemotron files — both `dataset_adapters/` (code, math, swe Parquet) and `synthetic_tasks/` (skill-based Parquet) — is `Nemotron-Terminal-Corpus`, because `discover_files()` derives `source_dataset` from the **first subdirectory** under root (`mixer.py:L43`). So `--include Nemotron-Terminal-Corpus` captures both adapters and synthetic tasks in a single filter.
+
+### 5.1 — Implementation
+
+#### `mixer.py`
+
+Add `_filter_files()` helper and thread `include`/`exclude` through `stream_all()` and `mix()`:
+
+```python
+def _filter_files(
+  file_list: list[dict[str, str]],
+  include: list[str] | None = None,
+  exclude: list[str] | None = None,
+) -> list[dict[str, str]]:
+  """Filter file list by source_dataset name."""
+  if include is not None:
+    include_set = frozenset(include)
+    file_list = [f for f in file_list if f["source_dataset"] in include_set]
+  if exclude is not None:
+    exclude_set = frozenset(exclude)
+    file_list = [f for f in file_list if f["source_dataset"] not in exclude_set]
+  return file_list
+```
+
+- `stream_all()` gains `include`/`exclude` params, applies `_filter_files()` after discovery
+- `mix()` gains `include`/`exclude` params, passes them to `stream_all()`
+
+#### `cli.py`
+
+Add two argparse arguments:
+
+```python
+parser.add_argument(
+  "--include", nargs="*", default=None,
+  help="Only include these source_dataset names (subdirectory names under input_dir)",
+)
+parser.add_argument(
+  "--exclude", nargs="*", default=None,
+  help="Exclude these source_dataset names from the mix",
+)
+```
+
+Pass to `mix()`.
+
+### 5.2 — Usage
+
+```bash
+# All data combined (~379,771 records)
+uv run python -m scripts.dataset_mixer datasets/ -o all_mixed.parquet
+
+# Nemotron only — adapters + synthetic tasks (~368,413 records)
+uv run python -m scripts.dataset_mixer datasets/ -o nemotron_mix.parquet \
+  --include Nemotron-Terminal-Corpus
+
+# Non-Nemotron — TeichAI + Raiden (~11,358 records)
+uv run python -m scripts.dataset_mixer datasets/ -o non_nemotron_mix.parquet \
+  --exclude Nemotron-Terminal-Corpus
+
+# Multiple includes (if more sources added later)
+uv run python -m scripts.dataset_mixer datasets/ -o subset.parquet \
+  --include Nemotron-Terminal-Corpus Raiden-Mini-DeepSeek-V3.2-Speciale
+```
+
+### 5.3 — Behavior
+
+- `--include` and `--exclude` can be used together: include narrows first, exclude removes from that result
+- If `--include` names a nonexistent source, result is 0 records (no crash, empty output skipped)
+- If neither flag is set, all sources are processed (current behavior, no regression)
+- Filtering happens on the file list **before** any adapters run — zero overhead
+
+### 5.4 — Tests (`tests/test_dataset_mixer.py`)
+
+Add to the existing test file following the same patterns (real data with `pytest.skip()`).
+
+#### `TestSourceFiltering`
+
+1. **`test_include_single_source`** — Run `mix()` with `include=["Nemotron-Terminal-Corpus"]`. Assert every record in output has `source_dataset == "Nemotron-Terminal-Corpus"`. Assert record count matches sum of all Nemotron files (adapters + synthetic).
+
+2. **`test_include_nemotron_gets_both_adapters_and_synthetic`** — Run `mix()` with `include=["Nemotron-Terminal-Corpus"]`. Discover files separately and verify that both `dataset_adapters/` and `synthetic_tasks/` files are present in the filtered list. This confirms that one `--include` value captures all 29 Nemotron Parquet files.
+
+3. **`test_exclude_single_source`** — Run `mix()` with `exclude=["Nemotron-Terminal-Corpus"]`. Assert no record in output has `source_dataset == "Nemotron-Terminal-Corpus"`. Assert the remaining sources are `deepseek-v3.2-speciale-openr1-math-3k` and `Raiden-Mini-DeepSeek-V3.2-Speciale`.
+
+4. **`test_exclude_record_count_matches_non_nemotron`** — Run `mix()` with `exclude=["Nemotron-Terminal-Corpus"]`. Assert record count equals sum of TeichAI (3,317) + Raiden (8,041) records.
+
+5. **`test_no_filter_includes_all_sources`** — Run `mix()` with no `include`/`exclude`. Assert output contains records from all three `source_dataset` values. Confirms no regression.
+
+6. **`test_include_nonexistent_source_returns_zero`** — Run `mix()` with `include=["does-not-exist"]`. Assert `total_records == 0` and no output file is written.
+
+7. **`test_include_and_exclude_compose`** — Run `mix()` with `include=["Nemotron-Terminal-Corpus", "Raiden-Mini-DeepSeek-V3.2-Speciale"]` and `exclude=["Raiden-Mini-DeepSeek-V3.2-Speciale"]`. Assert output contains only Nemotron records.
+
+8. **`test_filter_files_unit`** — Unit test `_filter_files()` directly with a synthetic file list. Test include-only, exclude-only, both, and neither.

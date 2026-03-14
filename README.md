@@ -63,13 +63,18 @@ uv run python -m scripts.parser_finale dataset/train.jsonl -O parsed_datasets/
 
 ```bash
 # Mix all datasets/ into a single Parquet file
-uv run python -m scripts.dataset_mixer datasets/ -o mixed_output.parquet
+uv run python -m scripts.dataset_mixer datasets/ -o output-datasets/full_mix_all_sources.parquet
+
+# Nemotron Terminal Corpus only (adapters + synthetic tasks)
+uv run python -m scripts.dataset_mixer datasets/ -o output-datasets/nemotron_terminal_corpus_only.parquet \
+  --include Nemotron-Terminal-Corpus
+
+# Everything except Nemotron (TeichAI + Raiden)
+uv run python -m scripts.dataset_mixer datasets/ -o output-datasets/teichai_raiden_no_nemotron.parquet \
+  --exclude Nemotron-Terminal-Corpus
 
 # Dry-run — show record counts per source, no output written
 uv run python -m scripts.dataset_mixer datasets/ --dry-run
-
-# Custom output path
-uv run python -m scripts.dataset_mixer datasets/ -o training/final_mix.parquet
 ```
 
 ### Split a dataset into parts
@@ -136,6 +141,25 @@ datasets/
 ├── deepseek-v3.2-speciale-openr1-math-3k/
 └── Raiden-Mini-DeepSeek-V3.2-Speciale/
 ```
+
+### Source Filtering
+
+Use `--include` and `--exclude` to produce filtered mix outputs from a single `datasets/` directory. Filter values are subdirectory names (which become the `source_dataset` column in the output):
+
+```bash
+# All data combined (~379,771 records)
+uv run python -m scripts.dataset_mixer datasets/ -o output-datasets/full_mix_all_sources.parquet
+
+# Nemotron only — both dataset_adapters/ and synthetic_tasks/ (~368,413 records)
+uv run python -m scripts.dataset_mixer datasets/ -o output-datasets/nemotron_terminal_corpus_only.parquet \
+  --include Nemotron-Terminal-Corpus
+
+# Everything except Nemotron — TeichAI + Raiden (~11,358 records)
+uv run python -m scripts.dataset_mixer datasets/ -o output-datasets/teichai_raiden_no_nemotron.parquet \
+  --exclude Nemotron-Terminal-Corpus
+```
+
+Filtering operates on the **file list before any data is read** — excluded sources are never opened. Both flags accept multiple values and can be combined (`--include` narrows first, `--exclude` removes from the result).
 
 ## Future Plans
 

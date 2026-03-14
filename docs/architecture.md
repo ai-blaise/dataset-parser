@@ -192,6 +192,7 @@ Key design decisions:
 - **Streaming**: Processes records in batches (default 10K) to handle large files (162K+ rows)
 - **Schema enforcement**: Output uses an explicit `pa.schema()`, not inferred
 - **Provenance**: `source_dataset` column is derived from the HuggingFace directory name
+- **Source filtering**: `--include`/`--exclude` flags filter the file list by `source_dataset` before any data is read, enabling targeted mix outputs (e.g. Nemotron-only, non-Nemotron) from a single `datasets/` directory
 
 See the [Dataset Mixer section in README](../README.md#dataset-mixer) for usage.
 

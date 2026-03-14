@@ -33,6 +33,18 @@ def main(argv: list[str] | None = None) -> None:
     action="store_true",
     help="Show record counts per source without writing output",
   )
+  parser.add_argument(
+    "--include",
+    nargs="*",
+    default=None,
+    help="Only include these source_dataset names (subdirectory names under input_dir)",
+  )
+  parser.add_argument(
+    "--exclude",
+    nargs="*",
+    default=None,
+    help="Exclude these source_dataset names from the mix",
+  )
 
   args = parser.parse_args(argv)
 
@@ -42,10 +54,17 @@ def main(argv: list[str] | None = None) -> None:
   else:
     print(f"Output: {args.output}\n")
 
+  if args.include:
+    print(f"Include: {', '.join(args.include)}")
+  if args.exclude:
+    print(f"Exclude: {', '.join(args.exclude)}")
+
   result = mix(
     input_dir=args.input_dir,
     output_path=args.output,
     dry_run=args.dry_run,
+    include=args.include,
+    exclude=args.exclude,
   )
 
   # Print summary
