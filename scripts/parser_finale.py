@@ -77,9 +77,11 @@ def process_record(record: dict[str, Any]) -> dict[str, Any]:
     Returns:
         Record with assistant message content emptied (structure preserved)
     """
+    # Support both 'messages' (JSONL) and 'conversations' (Parquet) keys
+    messages_key = "conversations" if "conversations" in record else "messages"
     processed: dict[str, Any] = {
         "uuid": record.get("uuid"),
-        "messages": process_messages(record.get("messages", [])),
+        messages_key: process_messages(record.get(messages_key, [])),
         "tools": record.get("tools", []),
         "license": record.get("license"),
         "used_in": record.get("used_in", []),

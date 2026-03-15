@@ -4,20 +4,17 @@ import json
 from typing import Any
 
 from textual.app import ComposeResult
-from textual.binding import Binding
 from textual.containers import ScrollableContainer, Vertical
 from textual.screen import ModalScreen
 from textual.widgets import Label, Static
+
+from scripts.tui.keybindings import MODAL_BINDINGS
 
 
 class FieldDetailModal(ModalScreen[None]):
     """A modal screen that displays the full content of a JSON field."""
 
-    BINDINGS = [
-        Binding("escape", "close", "Close"),
-        Binding("enter", "close", "Close"),
-        Binding("q", "quit", "Quit App"),
-    ]
+    BINDINGS = MODAL_BINDINGS
 
     CSS = """
     FieldDetailModal {
@@ -126,7 +123,7 @@ class FieldDetailModal(ModalScreen[None]):
             yield Label(self.panel_label, classes="modal-header")
             yield Label(f'Field: "{self.field_key}"', classes="field-key-label")
             with ScrollableContainer(classes="content-container"):
-                yield Static(formatted_value, classes="field-content")
+                yield Static(formatted_value, classes="field-content", markup=False)
             yield Label("Press [ESC] or [ENTER] to close", classes="close-hint")
 
     def action_close(self) -> None:

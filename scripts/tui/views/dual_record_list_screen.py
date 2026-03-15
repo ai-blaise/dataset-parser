@@ -11,7 +11,6 @@ from enum import Enum
 from typing import Any
 
 from textual.app import ComposeResult
-from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
 from textual.screen import Screen
 from textual.widgets import DataTable, Footer, Header, Static
@@ -27,6 +26,7 @@ from scripts.tui.data_loader import (
     load_records,
     load_records_range,
 )
+from scripts.tui.keybindings import DUAL_PANE_BINDINGS, PAGE_BINDINGS
 from scripts.tui.mixins import (
     BackgroundTaskMixin,
     DualPaneMixin,
@@ -96,13 +96,7 @@ class DualRecordListScreen(
     Footer { dock: bottom; }
     """
 
-    # All dual-pane bindings (vim navigation + panel switching) + pagination
-    BINDINGS = DualPaneMixin.DUAL_PANE_BINDINGS + [
-        Binding("n", "next_page", "Next Page", show=True),
-        Binding("p", "prev_page", "Prev Page", show=True),
-        Binding("g", "first_page", "First Page", show=False),
-        Binding("G", "last_page", "Last Page", show=False),
-    ]
+    BINDINGS = DUAL_PANE_BINDINGS + PAGE_BINDINGS
 
     def __init__(
         self,
@@ -449,15 +443,15 @@ class DualRecordListScreen(
         table = self.query_one(f"#{side}-record-table", DataTable)
         mapping = get_field_mapping(selected_file) if selected_file else FieldMapping()
 
-        # Clear and re-setup columns
+        # Clear and re-setup columns from actual field names
         table.clear(columns=True)
-        columns = self._get_record_columns(mapping)
+        columns = self._get_record_columns(mapping, records=page_records)
         self._configure_table(table, columns)
 
         for local_idx, record in enumerate(page_records):
             global_idx = start + local_idx
             summary = get_record_summary(record, global_idx, mapping)
-            row = self._build_record_row(summary, mapping)
+            row = self._build_record_row(summary, mapping, record=record)
             table.add_row(*row, key=str(global_idx))
 
         self._refresh_pane(side)

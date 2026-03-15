@@ -23,6 +23,7 @@ from scripts.tui.data_loader import (
     get_field_mapping,
     load_record_pair,
 )
+from scripts.tui.keybindings import DUAL_PANE_BINDINGS, TREE_BINDINGS
 from scripts.tui.mixins import DualPaneMixin, ExportMixin, VimNavigationMixin
 from scripts.tui.widgets import FieldDetailModal
 from scripts.tui.widgets.diff_indicator import calculate_diff
@@ -59,12 +60,9 @@ class ComparisonScreen(ExportMixin, DualPaneMixin, VimNavigationMixin, Screen):
        are defined in base.tcss and inherited via CSS_PATH */
     """
 
-    # All dual-pane bindings plus screen-specific bindings
-    BINDINGS = DualPaneMixin.DUAL_PANE_BINDINGS + [
+    BINDINGS = DUAL_PANE_BINDINGS + TREE_BINDINGS + [
         Binding("s", "toggle_sync", "Sync Scroll"),
         Binding("d", "toggle_diff", "Show Diff"),
-        Binding("e", "expand_all", "Expand All"),
-        Binding("c", "collapse_all", "Collapse All"),
         Binding("x", "export_record", "Export Record"),
     ]
 

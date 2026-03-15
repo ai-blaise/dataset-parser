@@ -134,10 +134,8 @@ class TestLoadRecords:
 
         loaded = list(load_records(str(filepath)))
         assert len(loaded) == 3
-        # Should be normalized: conversations -> messages
-        assert "messages" in loaded[0]
-        # trial_name should be used as uuid
-        assert loaded[0]["uuid"] == "trial-000"
+        # Should preserve raw column names (no normalization by default)
+        assert "conversations" in loaded[0]
 
     def test_load_records_returns_generator(self, tmp_path):
         """load_records should return a generator."""
@@ -179,7 +177,7 @@ class TestLoadAllRecords:
 
         loaded = load_all_records(str(filepath))
         assert len(loaded) == 5
-        assert "messages" in loaded[0]
+        assert "conversations" in loaded[0]
 
     def test_load_all_with_max_records(self, tmp_path):
         """load_all_records should respect max_records."""
@@ -250,8 +248,7 @@ class TestLoadRecordAtIndex:
         create_parquet_file(filepath, records)
 
         record = load_record_at_index(str(filepath), 4)
-        assert "messages" in record
-        assert record["uuid"] == "trial-004"
+        assert "conversations" in record
 
     def test_load_at_index_uses_cache(self, tmp_path):
         """load_record_at_index should use cache if available."""
@@ -319,10 +316,9 @@ class TestLoadRecordPair:
 
         original, processed = load_record_pair(str(filepath), 0)
 
-        # Original should have normalized messages with content
-        assert "messages" in original
-        # Processed should have empty assistant content
-        assert processed["messages"][1]["content"] == ""
+        # Both original and processed should have raw conversations key
+        assert "conversations" in original
+        assert processed["conversations"][1]["content"] == ""
 
 
 class TestGetRecordSummary:
@@ -482,17 +478,12 @@ class TestFormatConsistency:
         json_loaded = list(load_records(str(json_path)))[0]
         parquet_loaded = list(load_records(str(parquet_path)))[0]
 
-        # All should have 'messages' key (normalized)
+        # JSONL/JSON use 'messages', Parquet keeps raw 'conversations'
         assert "messages" in jsonl_loaded
         assert "messages" in json_loaded
-        assert "messages" in parquet_loaded
+        assert "conversations" in parquet_loaded
 
-        # All should have same uuid
-        assert jsonl_loaded["uuid"] == "test-001"
-        assert json_loaded["uuid"] == "test-001"
-        assert parquet_loaded["uuid"] == "test-001"
-
-        # All should have same message content
+        # All should have same message content (under format-specific keys)
         assert jsonl_loaded["messages"] == messages
         assert json_loaded["messages"] == messages
-        assert parquet_loaded["messages"] == messages
+        assert parquet_loaded["conversations"] == messages

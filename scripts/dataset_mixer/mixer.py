@@ -96,7 +96,10 @@ def stream_all(
   file_list = _filter_files(file_list, include, exclude)
 
   for file_info in file_list:
-    adapter = detect_adapter(file_info["path"])
+    try:
+      adapter = detect_adapter(file_info["path"])
+    except ValueError:
+      continue
     yield from adapter.stream(file_info["path"], file_info["source_dataset"])
 
 
@@ -104,7 +107,7 @@ def mix(
   input_dir: str,
   output_path: str,
   dry_run: bool = False,
-  batch_size: int = 10_000,
+  batch_size: int = 2_000,
   include: list[str] | None = None,
   exclude: list[str] | None = None,
 ) -> dict[str, Any]:
@@ -161,6 +164,7 @@ def mix(
           writer = pq.ParquetWriter(output_path, OUTPUT_SCHEMA)
         writer.write_table(table)
         batch = []
+        print(f"\r  {total:,} records written...", end="", flush=True)
 
     # Write remaining records
     if batch:
@@ -168,6 +172,9 @@ def mix(
       if writer is None:
         writer = pq.ParquetWriter(output_path, OUTPUT_SCHEMA)
       writer.write_table(table)
+
+    if total > 0:
+      print(f"\r  {total:,} records written.   ")
   finally:
     if writer is not None:
       writer.close()

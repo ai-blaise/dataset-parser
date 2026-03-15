@@ -17,15 +17,18 @@ from enum import Enum
 from typing import Any
 
 from textual.app import App
-from textual.binding import Binding
 
 from scripts.data_formats import detect_format, discover_data_files
 from scripts.tui.data_loader import get_record_count, load_all_records, load_records, set_cached_records
+from scripts.tui.keybindings import GLOBAL_BINDINGS
 from scripts.tui.mixins import BackgroundTaskMixin
 from scripts.tui.screens import ExportingScreen, LoadingScreen
 from scripts.tui.views.comparison_screen import ComparisonScreen
 from scripts.tui.views.file_list import FileListScreen
+from scripts.tui.views.record_detail import RecordDetailScreen
 from scripts.tui.views.record_list import RecordListScreen
+from scripts.tui.widgets import FieldDetailModal
+from scripts.tui.widgets.json_tree_panel import JsonTreePanel
 
 
 class AppMode(Enum):
@@ -145,9 +148,7 @@ class JsonComparisonApp(BackgroundTaskMixin, App):
     }
     """
 
-    BINDINGS = [
-        Binding("q", "quit", "Quit", show=True),
-    ]
+    BINDINGS = GLOBAL_BINDINGS
 
     def __init__(
         self,
@@ -157,6 +158,7 @@ class JsonComparisonApp(BackgroundTaskMixin, App):
         output_dir: str | None = None,
         compare_path: str | None = None,
         is_compare_directory: bool = False,
+        export_mode: bool = False,
     ):
         """Initialize the app with a data file or directory.
 
@@ -167,12 +169,14 @@ class JsonComparisonApp(BackgroundTaskMixin, App):
             output_dir: Output directory for export operations.
             compare_path: Path to second dataset for comparison mode.
             is_compare_directory: Whether compare_path is a directory.
+            export_mode: If True, use comparison/export screen. If False, read-only view.
         """
         super().__init__()
         self._path = path
         self._input_format = input_format
         self._is_directory = is_directory
         self._output_dir = output_dir
+        self._export_mode = export_mode
         self._current_file: str | None = None
         self.filename = path if not is_directory else ""
         self.records: list[dict] = []
@@ -245,10 +249,41 @@ class JsonComparisonApp(BackgroundTaskMixin, App):
         self._current_file = event.file_path
         self._load_single_file(event.file_path)
 
+    def action_show_detail(self) -> None:
+        """Global handler for m key — show detail modal for focused JsonTreePanel."""
+        focused = self.focused
+        if isinstance(focused, JsonTreePanel):
+            focused.emit_node_selected()
+            return
+        # Fallback: find any visible JsonTreePanel on the current screen
+        try:
+            trees = self.screen.query(JsonTreePanel)
+            for tree in trees:
+                if tree.display:
+                    tree.emit_node_selected()
+                    return
+        except Exception:
+            pass
+
+    def on_json_tree_panel_node_selected(
+        self, message: JsonTreePanel.NodeSelected
+    ) -> None:
+        """Global handler for node selection — show field detail modal."""
+        self.push_screen(
+            FieldDetailModal(
+                field_key=message.node_key,
+                field_value=message.node_value,
+                panel_label="Record",
+            )
+        )
+
     def show_comparison(self, index: int) -> None:
-        """Push the comparison screen for the selected record."""
+        """Push the appropriate detail screen for the selected record."""
         filename = self.filename or ""
-        self.push_screen(ComparisonScreen(filename, index))
+        if self._export_mode:
+            self.push_screen(ComparisonScreen(filename, index))
+        else:
+            self.push_screen(RecordDetailScreen(filename, index))
 
     def _load_directory(self) -> None:
         """Load directory and show file list."""
@@ -291,7 +326,7 @@ class JsonComparisonApp(BackgroundTaskMixin, App):
                 self._loading = False
                 # Push paginated record list immediately — no data loaded yet
                 if total == 1:
-                    self.push_screen(ComparisonScreen(filepath, 0))
+                    self.show_comparison(0)
                 else:
                     self.push_screen(
                         RecordListScreen(filename=filepath, total_count=total)
@@ -324,14 +359,14 @@ class JsonComparisonApp(BackgroundTaskMixin, App):
         self.notify(f"Loaded {len(self.records):,} records")
 
     def _push_appropriate_screen(self) -> None:
-        """Push RecordListScreen or ComparisonScreen based on record count.
+        """Push RecordListScreen or detail screen based on record count.
 
         If there's only 1 record, skip the record list and go directly
-        to the comparison view. Otherwise show the record list for selection.
+        to the detail view. Otherwise show the record list for selection.
         """
         if len(self.records) == 1:
-            # Single record - go straight to comparison view
-            self.push_screen(ComparisonScreen(self.filename, 0))
+            # Single record - go straight to detail view
+            self.show_comparison(0)
         else:
             # Multiple records - show record list for selection
             self.push_screen(RecordListScreen())
@@ -366,6 +401,13 @@ def main() -> None:
         dest="compare_path",
         default=None,
         help="Path to second dataset for side-by-side comparison",
+    )
+    parser.add_argument(
+        "-x",
+        "--export",
+        action="store_true",
+        default=False,
+        help="Enable export mode (comparison view with parser_finale processing)",
     )
     args = parser.parse_args()
 
@@ -406,6 +448,7 @@ def main() -> None:
         output_dir=args.output_dir,
         compare_path=args.compare_path,
         is_compare_directory=is_compare_directory,
+        export_mode=args.export,
     )
     app.run()
 

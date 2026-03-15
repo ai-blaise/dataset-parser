@@ -39,8 +39,11 @@ pip install -e .
 ### Browse a dataset interactively
 
 ```bash
-# Open a single file
+# Open a single file (read-only view)
 uv run python -m scripts.tui.app dataset/conversations.jsonl
+
+# Open with export mode (original vs. parsed side-by-side)
+uv run python -m scripts.tui.app dataset/conversations.jsonl -x
 
 # Open a directory (shows file picker)
 uv run python -m scripts.tui.app dataset/
@@ -102,15 +105,16 @@ uv run python -m scripts.data_splitter dataset/conversations.jsonl -n 10 --dry-r
 
 | Key | Action |
 |-----|--------|
-| `Enter` | Select file / View record details |
-| `ESC` / `b` | Go back / Close modal |
-| `m` | Show field detail modal |
-| `P` | Export all files in directory (File List) |
-| `X` | Export all records in file (Record List) |
-| `x` | Export current record (Comparison) |
-
 | `q` | Quit |
-| Arrow keys | Navigate |
+| `m` | Show field detail modal (global — works on any tree view) |
+| `j/k` or `↑/↓` | Move up/down |
+| `g/G` | Jump to top/bottom |
+| `Enter` | Select item / Expand node |
+| `ESC` / `b` | Go back |
+| `h/l` or `Tab` | Switch pane focus (dual-pane modes) |
+| `e/c` | Expand/collapse all nodes (tree views) |
+| `n/p` | Next/previous page (large files) |
+| `P/X/x` | Export files/records/record (requires `-x` mode) |
 
 ### Parser Finale Formats
 
@@ -181,6 +185,7 @@ For detailed documentation, see the [docs](docs/) directory:
 - [Parser Finale](docs/parser-finale.md) - Transformation tool documentation
 - [Data Splitter](docs/data-splitter.md) - Dataset splitting utility
 - [Data Formats](docs/data-formats.md) - Multi-format loading and schema normalization
+- [Verify Datasets](docs/verify-datasets.md) - How to verify mixed training outputs against source datasets
 
 ## Development
 
@@ -215,8 +220,10 @@ dataset-parser/
 │   │   └── schema.py     # Explicit PyArrow output schema
 │   └── tui/              # Terminal UI
 │       ├── app.py        # Main application
+│       ├── keybindings.py # Centralized keybinding definitions
 │       ├── data_loader.py
-│       ├── views/        # Screen components
+│       ├── views/        # Screen components (record_detail, record_list, comparison, etc.)
+│       ├── mixins/       # Reusable behavior (vim nav, dual pane, export, etc.)
 │       └── widgets/      # Reusable UI widgets
 ├── tests/                # Test suite
 ├── datasets/             # HuggingFace datasets (gitignored)

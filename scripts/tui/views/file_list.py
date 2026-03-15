@@ -17,6 +17,7 @@ from textual.widgets import DataTable, Footer, Header, Static
 from scripts.data_formats import format_file_size
 from scripts.parser_finale import process_record
 from scripts.tui.data_loader import export_records, load_all_records
+from scripts.tui.keybindings import SINGLE_PANE_BINDINGS
 from scripts.tui.mixins import DataTableMixin, ExportMixin, VimNavigationMixin
 
 
@@ -50,9 +51,7 @@ class FileListScreen(ExportMixin, DataTableMixin, VimNavigationMixin, Screen):
     }
     """
 
-    BINDINGS = VimNavigationMixin.VIM_BINDINGS + [
-        Binding("q", "quit", "Quit", show=False),
-        Binding("escape", "quit", "Quit", show=True),
+    BINDINGS = SINGLE_PANE_BINDINGS + [
         Binding("P", "export_all_files", "Export All Files"),
     ]
 
@@ -108,6 +107,10 @@ class FileListScreen(ExportMixin, DataTableMixin, VimNavigationMixin, Screen):
 
     def action_quit(self) -> None:
         """Quit the application."""
+        self.app.exit()
+
+    def action_go_back(self) -> None:
+        """Go back — quits since this is the root screen."""
         self.app.exit()
 
     def action_export_all_files(self) -> None:

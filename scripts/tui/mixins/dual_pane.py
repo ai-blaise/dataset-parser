@@ -21,7 +21,7 @@ Usage:
 
 from __future__ import annotations
 
-from textual.binding import Binding
+import scripts.tui.keybindings as keybindings
 
 
 class DualPaneMixin:
@@ -34,37 +34,15 @@ class DualPaneMixin:
     IMPORTANT: This mixin MUST come before VimNavigationMixin in the
     inheritance order so that h/l keys switch panels instead of doing nothing.
 
-    Class Attributes:
-        DUAL_PANE_BINDINGS: All bindings for dual-pane screens (includes
-            vim j/k/g/G navigation plus panel switching).
-
     Usage:
         class MyScreen(DualPaneMixin, VimNavigationMixin, Screen):
-            BINDINGS = DualPaneMixin.DUAL_PANE_BINDINGS + [
+            BINDINGS = keybindings.DUAL_PANE_BINDINGS + [
                 # screen-specific bindings here
             ]
     """
 
-    # Combined bindings: vim navigation + panel switching
-    # Use this single constant for all dual-pane screens
-    DUAL_PANE_BINDINGS = [
-        # Vim navigation (j/k/g/G from VimNavigationMixin)
-        Binding("j", "vim_down", "Down", show=False),
-        Binding("k", "vim_up", "Up", show=False),
-        Binding("g", "vim_top", "Top", show=False),
-        Binding("G", "vim_bottom", "Bottom", show=False),
-        # Panel switching (h/l vim-style + arrow keys + tab)
-        Binding("h", "vim_left", "Left Panel", show=False),
-        Binding("l", "vim_right", "Right Panel", show=False),
-        Binding("left", "vim_left", "Left Panel", show=False),
-        Binding("right", "vim_right", "Right Panel", show=False),
-        Binding("tab", "switch_panel", "Switch Panel", show=True),
-        # Common actions
-        Binding("escape", "go_back", "Back", show=True),
-        Binding("b", "go_back", "Back", show=False),
-        Binding("q", "quit", "Quit", show=False),
-        Binding("m", "show_field_detail", "View Field", show=True),
-    ]
+    # Re-export for backwards compatibility
+    DUAL_PANE_BINDINGS = keybindings.DUAL_PANE_BINDINGS
 
     _active_panel: str = "left"
     """Currently active panel identifier ('left' or 'right')."""
@@ -133,7 +111,7 @@ class DualPaneMixin:
         """Exit the application."""
         self.app.exit()
 
-    def action_show_field_detail(self) -> None:
+    def action_show_detail(self) -> None:
         """Show the field detail modal for the current JSON tree node.
 
         Queries for the active panel's JSON tree (#left-tree or #right-tree)

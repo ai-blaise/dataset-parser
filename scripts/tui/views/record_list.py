@@ -28,6 +28,7 @@ from scripts.tui.data_loader import (
     load_record_at_index,
     FieldMapping,
 )
+from scripts.tui.keybindings import PAGE_BINDINGS, SINGLE_PANE_BINDINGS
 from scripts.tui.mixins import ExportMixin, RecordTableMixin, VimNavigationMixin
 from scripts.parser_finale import process_record
 
@@ -71,15 +72,8 @@ class RecordListScreen(ExportMixin, RecordTableMixin, VimNavigationMixin, Screen
     }
     """
 
-    BINDINGS = VimNavigationMixin.VIM_BINDINGS + [
-        Binding("q", "quit", "Quit", show=False),
-        Binding("escape", "go_back", "Back", show=True),
-        Binding("b", "go_back", "Back", show=False),
+    BINDINGS = SINGLE_PANE_BINDINGS + PAGE_BINDINGS + [
         Binding("X", "export_all", "Export All"),
-        Binding("n", "next_page", "Next Page", show=True),
-        Binding("p", "prev_page", "Prev Page", show=True),
-        Binding("g", "first_page", "First Page", show=False),
-        Binding("G", "last_page", "Last Page", show=False),
     ]
 
     class RecordSelected(Message):
@@ -160,16 +154,17 @@ class RecordListScreen(ExportMixin, RecordTableMixin, VimNavigationMixin, Screen
             self._records = []
 
         mapping = get_field_mapping(self.filename) if self.filename else FieldMapping()
-        columns = self._get_record_columns(mapping)
-        table = self._setup_table("record-table", columns)
 
         if not self._records:
+            columns = self._get_record_columns(mapping)
+            table = self._setup_table("record-table", columns)
             placeholder = ["--"] * len(columns)
             if len(placeholder) > 1:
                 placeholder[1] = "No records found"
             table.add_row(*placeholder)
             return
 
+        table = self.query_one("#record-table", DataTable)
         self._populate_record_table(table, self._records, mapping)
 
     def _load_page(self, page: int) -> None:
@@ -190,7 +185,7 @@ class RecordListScreen(ExportMixin, RecordTableMixin, VimNavigationMixin, Screen
         )
 
         mapping = get_field_mapping(self.filename) if self.filename else FieldMapping()
-        columns = self._get_record_columns(mapping)
+        columns = self._get_record_columns(mapping, records=self._page_records)
         table = self._setup_table("record-table", columns)
 
         if not self._page_records:
@@ -203,7 +198,7 @@ class RecordListScreen(ExportMixin, RecordTableMixin, VimNavigationMixin, Screen
             for local_idx, record in enumerate(self._page_records):
                 global_idx = start + local_idx
                 summary = get_record_summary(record, global_idx, mapping)
-                row = self._build_record_row(summary, mapping)
+                row = self._build_record_row(summary, mapping, record=record)
                 table.add_row(*row, key=str(global_idx))
 
         self._update_page_status()

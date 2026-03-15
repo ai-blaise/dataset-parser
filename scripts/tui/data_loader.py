@@ -374,7 +374,7 @@ def load_jsonl(filename: str) -> Iterator[dict[str, Any]]:
                 yield json.loads(line)
 
 
-def load_records(filename: str, normalize: bool = True) -> Iterator[dict[str, Any]]:
+def load_records(filename: str, normalize: bool = False) -> Iterator[dict[str, Any]]:
     """
     Lazily load records from any supported file format.
 
@@ -410,7 +410,7 @@ def load_all_records(
     use_cache: bool = True,
     progress_callback: Callable[[int, int | None], None] | None = None,
     max_records: int | None = None,
-    normalize: bool = True,
+    normalize: bool = False,
 ) -> list[dict[str, Any]]:
     """
     Load all records from a data file into memory.
@@ -474,7 +474,7 @@ def load_records_range(
     filename: str,
     start: int,
     count: int,
-    normalize: bool = True,
+    normalize: bool = False,
 ) -> list[dict[str, Any]]:
     """Load a range of records efficiently without loading the entire file.
 
@@ -520,7 +520,7 @@ def load_records_range(
 
 
 def load_record_at_index(
-    filename: str, index: int, normalize: bool = True
+    filename: str, index: int, normalize: bool = False
 ) -> dict[str, Any]:
     """
     Load a single record at a specific index efficiently.

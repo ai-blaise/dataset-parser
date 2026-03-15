@@ -45,6 +45,12 @@ def main(argv: list[str] | None = None) -> None:
     default=None,
     help="Exclude these source_dataset names from the mix",
   )
+  parser.add_argument(
+    "--batch-size",
+    type=int,
+    default=2_000,
+    help="Records per write batch — lower uses less memory (default: 2000)",
+  )
 
   args = parser.parse_args(argv)
 
@@ -63,6 +69,7 @@ def main(argv: list[str] | None = None) -> None:
     input_dir=args.input_dir,
     output_path=args.output,
     dry_run=args.dry_run,
+    batch_size=args.batch_size,
     include=args.include,
     exclude=args.exclude,
   )

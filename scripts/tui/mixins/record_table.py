@@ -1,27 +1,18 @@
 """
-RecordTable Mixin for dynamic schema-aware record display.
+RecordTable Mixin for dynamic field-driven record display.
+
+Columns are derived from the actual top-level field names of the records,
+so the table is a true preview of the record structure.
 
 Provides reusable methods for:
-- Dynamic column generation based on detected schema
+- Dynamic column generation from record field names
 - Single-record detection for skip-to-detail behavior
 - Consistent record table population
-
-Usage:
-    class MyScreen(RecordTableMixin, Screen):
-        def _load_records(self, filepath):
-            records = load_all_records(filepath)
-            mapping = get_field_mapping(filepath)
-
-            if self._should_skip_record_list(records):
-                # Go directly to detail view
-                self._show_record_detail(records[0])
-            else:
-                # Show record list
-                self._populate_records(table, records, mapping)
 """
 
 from __future__ import annotations
 
+import json
 from typing import TYPE_CHECKING, Any
 
 from textual.widgets import DataTable
@@ -31,63 +22,136 @@ from scripts.tui.mixins.data_table import DataTableMixin
 if TYPE_CHECKING:
     from scripts.tui.data_loader import FieldMapping
 
+# Maximum number of field columns (besides IDX) to display
+MAX_FIELD_COLUMNS = 8
+
+# Maximum width of a field value preview cell
+MAX_CELL_WIDTH = 30
+
+
+def _preview_value(value: Any, max_len: int = MAX_CELL_WIDTH) -> str:
+    """Create a short preview string for any value type.
+
+    Args:
+        value: The value to preview.
+        max_len: Maximum length of the output string.
+
+    Returns:
+        A truncated string preview of the value.
+    """
+    if value is None:
+        return "null"
+    if isinstance(value, str):
+        text = value
+    elif isinstance(value, bool):
+        return str(value).lower()
+    elif isinstance(value, (int, float)):
+        return str(value)
+    elif isinstance(value, list):
+        text = f"[{len(value)} items]"
+    elif isinstance(value, dict):
+        text = f"{{{len(value)} keys}}"
+    else:
+        text = str(value)
+
+    if len(text) <= max_len:
+        return text
+    if max_len <= 3:
+        return text[:max_len]
+    return text[: max_len - 3] + "..."
+
 
 class RecordTableMixin(DataTableMixin):
-    """Mixin providing dynamic schema-aware record table functionality.
+    """Mixin providing field-driven record table functionality.
+
+    Columns are derived from the actual top-level keys of the records,
+    giving a true preview of the data structure.
 
     Inherits from DataTableMixin for common table operations.
     """
 
-    def _get_record_columns(
-        self, mapping: "FieldMapping"
-    ) -> list[tuple[str, int | None]]:
-        """Generate column config based on detected field mapping.
+    # Cached field names for the current table
+    _field_columns: list[str] = []
 
-        Only includes columns for fields that were actually detected.
-        This ensures the table adapts to whatever schema the data uses.
+    def _detect_field_columns(self, records: list[dict[str, Any]]) -> list[str]:
+        """Detect field names from the records to use as table columns.
+
+        Scans the first record to get field names. Limits to
+        MAX_FIELD_COLUMNS to keep the table readable.
 
         Args:
-            mapping: The detected field mapping for the dataset.
+            records: List of records to scan.
+
+        Returns:
+            List of field name strings to use as columns.
+        """
+        if not records:
+            return []
+        sample = records[0]
+        return list(sample.keys())[:MAX_FIELD_COLUMNS]
+
+    def _get_record_columns(
+        self, mapping: "FieldMapping", records: list[dict[str, Any]] | None = None
+    ) -> list[tuple[str, int | None]]:
+        """Generate column config from actual record field names.
+
+        Uses the top-level keys of the records as column headers.
+        The first column is always IDX (record index). Remaining
+        columns are the field names from the data.
+
+        Args:
+            mapping: The detected field mapping (used for fallback).
+            records: Records to derive columns from. If None, falls
+                     back to basic IDX + PREVIEW columns.
 
         Returns:
             List of (column_name, width) tuples. Width of None means flexible.
         """
         cols: list[tuple[str, int | None]] = [("IDX", 6)]
 
-        if mapping.uuid:
-            cols.append(("ID", 15))
-        if mapping.messages:
-            cols.append(("MSGS", 6))
-        if mapping.tools:
-            cols.append(("TOOLS", 6))
+        if records:
+            self._field_columns = self._detect_field_columns(records)
+        else:
+            self._field_columns = []
 
-        cols.append(("PREVIEW", None))  # flexible width
+        if self._field_columns:
+            # Last field gets flexible width, others get capped width
+            for i, field_name in enumerate(self._field_columns):
+                is_last = i == len(self._field_columns) - 1
+                width = None if is_last else MAX_CELL_WIDTH
+                cols.append((field_name, width))
+        else:
+            cols.append(("PREVIEW", None))
+
         return cols
 
     def _build_record_row(
-        self, summary: dict[str, Any], mapping: "FieldMapping"
+        self, summary: dict[str, Any], mapping: "FieldMapping",
+        record: dict[str, Any] | None = None,
     ) -> list[str]:
-        """Build a table row dynamically based on field mapping.
+        """Build a table row from record field values.
 
-        Only includes values for columns that exist in the mapping.
+        Uses the detected field columns to extract and preview
+        each field's value from the record.
 
         Args:
             summary: Record summary from get_record_summary().
-            mapping: The detected field mapping for the dataset.
+            mapping: The detected field mapping.
+            record: The full record dict. If provided, values are
+                    extracted directly from it.
 
         Returns:
             List of string values for the row.
         """
         row: list[str] = [str(summary["index"])]
 
-        if mapping.uuid:
-            row.append(summary["uuid"])
-        if mapping.messages:
-            row.append(str(summary["msg_count"]))
-        if mapping.tools:
-            row.append(str(summary["tool_count"]))
+        if record and self._field_columns:
+            for field_name in self._field_columns:
+                value = record.get(field_name)
+                row.append(_preview_value(value))
+        else:
+            row.append(summary.get("preview", ""))
 
-        row.append(summary["preview"])
         return row
 
     def _should_skip_record_list(self, records: list[dict[str, Any]]) -> bool:
@@ -112,10 +176,10 @@ class RecordTableMixin(DataTableMixin):
         mapping: "FieldMapping",
         get_summary_fn: Any = None,
     ) -> None:
-        """Populate a DataTable with records using dynamic columns.
+        """Populate a DataTable with records using field-derived columns.
 
         Clears existing content and adds columns/rows based on the
-        detected field mapping.
+        actual field names in the records.
 
         Args:
             table: The DataTable widget to populate.
@@ -132,13 +196,13 @@ class RecordTableMixin(DataTableMixin):
         # Clear existing content
         table.clear(columns=True)
 
-        # Add columns dynamically using base class method
-        columns = self._get_record_columns(mapping)
+        # Add columns derived from record field names
+        columns = self._get_record_columns(mapping, records=records)
         self._configure_table(table, columns)
 
         # Add rows
         for idx, record in enumerate(records):
             summary = get_summary_fn(record, idx, mapping)
-            row = self._build_record_row(summary, mapping)
+            row = self._build_record_row(summary, mapping, record=record)
             table.add_row(*row, key=str(idx))
 

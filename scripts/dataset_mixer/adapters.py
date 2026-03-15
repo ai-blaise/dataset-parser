@@ -140,7 +140,15 @@ def detect_adapter(filename: str) -> BaseAdapter:
   fmt = detect_format(filename)
 
   if fmt == "csv":
-    return PromptCompletionCSVAdapter()
+    loader = CSVLoader()
+    for record in loader.load(filename):
+      if "prompt" in record and "completion" in record:
+        return PromptCompletionCSVAdapter()
+      raise ValueError(
+        f"CSV file '{filename}' missing 'prompt'/'completion' columns "
+        f"(found: {list(record.keys())})"
+      )
+    raise ValueError(f"CSV file '{filename}' is empty")
 
   if fmt == "parquet":
     import pyarrow.parquet as pq

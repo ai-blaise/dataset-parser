@@ -11,8 +11,9 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from textual.binding import Binding
 from textual.widgets import DataTable, ListView, Tree
+
+from scripts.tui.keybindings import VIM_NAV_BINDINGS
 
 if TYPE_CHECKING:
     from textual.widget import Widget
@@ -30,19 +31,15 @@ class VimNavigationMixin:
 
     Usage:
         class MyScreen(VimNavigationMixin, Screen):
-            BINDINGS = VimNavigationMixin.VIM_BINDINGS + [...]
+            BINDINGS = keybindings.SINGLE_PANE_BINDINGS + [...]
 
         # For dual-pane screens (DualPaneMixin MUST come first for h/l to work):
         class MyDualScreen(DualPaneMixin, VimNavigationMixin, Screen):
-            BINDINGS = DualPaneMixin.DUAL_PANE_BINDINGS + [...]
+            BINDINGS = keybindings.DUAL_PANE_BINDINGS + [...]
     """
 
-    VIM_BINDINGS = [
-        Binding("j", "vim_down", "Down", show=False),
-        Binding("k", "vim_up", "Up", show=False),
-        Binding("g", "vim_top", "Top", show=False),
-        Binding("G", "vim_bottom", "Bottom", show=False),
-    ]
+    # Re-export for backwards compatibility
+    VIM_BINDINGS = VIM_NAV_BINDINGS
 
     def _get_navigable_widget(self) -> Widget | None:
         """Get the currently focused widget if it supports navigation.

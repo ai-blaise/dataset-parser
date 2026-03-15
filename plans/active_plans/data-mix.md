@@ -539,3 +539,49 @@ Add to the existing test file following the same patterns (real data with `pytes
 7. **`test_include_and_exclude_compose`** — Run `mix()` with `include=["Nemotron-Terminal-Corpus", "Raiden-Mini-DeepSeek-V3.2-Speciale"]` and `exclude=["Raiden-Mini-DeepSeek-V3.2-Speciale"]`. Assert output contains only Nemotron records.
 
 8. **`test_filter_files_unit`** — Unit test `_filter_files()` directly with a synthetic file list. Test include-only, exclude-only, both, and neither.
+
+---
+
+## Post-Implementation Updates
+
+@architect: The mixer was crashing on CSV files without prompt/completion columns — it needs to validate columns. Also the TUI viewer must work with mixed Parquet output (which uses `conversations` not `messages`), so parser_finale needs to handle both key names. Default normalization in the data loader should be off so the TUI shows raw field names as they exist in the data. The record list columns should show actual field names, not hardcoded IDX/ID/MSGS/TOOLS/PREVIEW. Added a read-only view mode with `-x`/`--export` flag. Keybindings must be a GLOBAL setting that ALL views obey — they were scattered with inconsistencies. The `m` key for the detail modal must work everywhere a JsonTreePanel is visible. The modal was crashing on data with `[`, `]`, `=` characters. Added verify-datasets documentation.
+
+@claude-opus-4.6: Hardened mixer, added conversations key support, disabled default normalization, centralized keybindings, global `m` binding, field-driven columns, read-only view mode, and fixed modal crash.
+
+Dataset mixer hardening:
+- `scripts/dataset_mixer/adapters.py`: `detect_adapter()` for CSV now validates `prompt`/`completion` columns exist in the first record; raises ValueError with column names on mismatch
+- `scripts/dataset_mixer/mixer.py`: `stream_all()` wraps `detect_adapter()` in try/except ValueError and skips unrecognized files instead of crashing the entire mix
+
+Conversations key support & normalization:
+- `scripts/parser_finale.py`: `process_record()` now supports both `messages` (JSONL) and `conversations` (Parquet) keys — checks for `conversations` first, falls back to `messages`
+- `scripts/tui/data_loader.py`: `normalize` default changed from `True` to `False` in `load_records()`, `load_all_records()`, `load_records_range()`, and `load_record_at_index()` — TUI shows raw field names
+- `tests/test_multiformat_tui.py`: updated all assertions to expect raw column names (`conversations` for Parquet, `messages` for JSONL/JSON) instead of assuming normalization
+
+Read-only view mode:
+- `scripts/tui/views/record_detail.py`: new screen — full-width single-pane JsonTreePanel, no parser_finale processing
+- `scripts/tui/app.py`: added `export_mode` flag and `-x`/`--export` CLI arg; `show_comparison()` routes to RecordDetailScreen (default) or ComparisonScreen (`-x`)
+- `scripts/tui/views/__init__.py`: exported RecordDetailScreen
+
+Centralized keybindings:
+- Created `scripts/tui/keybindings.py`: single source of truth for all binding groups (GLOBAL, BACK, VIM_NAV, PANEL, TREE, PAGE, MODAL) plus composites (SINGLE_PANE_BINDINGS, DUAL_PANE_BINDINGS)
+- All views updated to import from keybindings module instead of defining inline
+- `scripts/tui/mixins/dual_pane.py`: re-exports from keybindings; renamed `action_show_field_detail` → `action_show_detail`
+- `scripts/tui/mixins/vim_navigation.py`: re-exports VIM_NAV_BINDINGS
+- Fixed: FileListScreen escape→quit changed to escape→go_back; added action_go_back
+- Fixed: RecordDetailScreen was missing j/k vim navigation bindings
+
+Global `m` binding:
+- `m` → `show_detail` moved to GLOBAL_BINDINGS (available on every screen)
+- `scripts/tui/app.py`: app-level `action_show_detail` finds any visible JsonTreePanel and calls `emit_node_selected()`; app-level `on_json_tree_panel_node_selected` as fallback handler
+- `scripts/tui/views/record_detail.py`: fixed action_show_detail — was checking `node.data` (Textual's generic string) instead of using `tree.emit_node_selected()`
+
+Field-driven record list columns (diverges from generalize-data-table-format plan):
+- `scripts/tui/mixins/record_table.py`: `_get_record_columns` now derives columns from actual top-level field names of records instead of hardcoded IDX/ID/MSGS/TOOLS/PREVIEW; added `_detect_field_columns()`, `_preview_value()`
+- API changed: `_get_record_columns(mapping)` → `_get_record_columns(mapping, records=...)`; `_build_record_row(summary, mapping)` → `_build_record_row(summary, mapping, record=...)`
+
+Modal crash fix:
+- `scripts/tui/widgets/field_detail_modal.py`: added `markup=False` to Static widget — data with `[`, `]`, `=` chars caused MarkupError crash; uses MODAL_BINDINGS from keybindings module
+
+Documentation:
+- `docs/verify-datasets.md`: new doc on verifying mixed training outputs against source datasets
+- `README.md`: added link to verify-datasets doc
