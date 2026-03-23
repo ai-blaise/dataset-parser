@@ -76,6 +76,21 @@ uv run python -m scripts.dataset_mixer datasets/ -o output-datasets/nemotron_ter
 uv run python -m scripts.dataset_mixer datasets/ -o output-datasets/teichai_raiden_no_nemotron.parquet \
   --exclude Nemotron-Terminal-Corpus
 
+# Nemotron-SFT-Agentic-v2 only (search + tool_calling combined)
+uv run python -m scripts.dataset_mixer datasets/ -o output-datasets/nemotron_agentic_v2_combined.parquet \
+  --include Nemotron-SFT-Agentic-v2
+
+# Nemotron-SFT-Agentic-v2 with random sample (50%)
+uv run python -m scripts.dataset_mixer datasets/ -o output-datasets/nemotron_agentic_v2_sample_50.parquet \
+  --include Nemotron-SFT-Agentic-v2 \
+  --sample-rate 0.5
+
+# Nemotron-SFT-Agentic-v2 with random sample (20%) and seed for reproducibility
+uv run python -m scripts.dataset_mixer datasets/ -o output-datasets/nemotron_agentic_v2_sample_20.parquet \
+  --include Nemotron-SFT-Agentic-v2 \
+  --sample-rate 0.2 \
+  --sample-seed 42
+
 # Dry-run — show record counts per source, no output written
 uv run python -m scripts.dataset_mixer datasets/ --dry-run
 ```

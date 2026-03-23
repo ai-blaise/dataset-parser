@@ -8,9 +8,13 @@ where each line is a valid JSON object.
 from __future__ import annotations
 
 import json
+import re
 from typing import Any, Callable, Iterator
 
 from scripts.data_formats.base import DataLoader
+
+CONTROL_CHAR_PATTERN = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
+NULL_BYTE_PATTERN = re.compile(r"\x00+")
 
 
 class JSONLLoader(DataLoader):
@@ -55,11 +59,16 @@ class JSONLLoader(DataLoader):
             >>> for record in loader.load("data.jsonl"):
             ...     print(record["uuid"])
         """
-        with open(filename, "r", encoding="utf-8") as f:
+        with open(filename, "r", encoding="utf-8", errors="surrogatepass") as f:
             for line in f:
                 line = line.strip()
                 if line:
-                    yield json.loads(line)
+                    line = NULL_BYTE_PATTERN.sub(" ", line)
+                    line = CONTROL_CHAR_PATTERN.sub("", line)
+                    try:
+                        yield json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
 
     def load_all(
         self,
@@ -116,7 +125,7 @@ class JSONLLoader(DataLoader):
             FileNotFoundError: If the file does not exist.
         """
         count = 0
-        with open(filename, "r", encoding="utf-8") as f:
+        with open(filename, "r", encoding="utf-8", errors="surrogatepass") as f:
             for line in f:
                 if line.strip():
                     count += 1

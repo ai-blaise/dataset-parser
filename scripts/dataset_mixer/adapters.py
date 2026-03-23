@@ -9,6 +9,7 @@ convention), NOT 'messages' (TUI convention).
 
 from __future__ import annotations
 
+import json
 from abc import ABC, abstractmethod
 from typing import Any, Iterator
 
@@ -26,143 +27,203 @@ _NEMOTRON_DROP_COLUMNS = {"trial_name", "source"}
 
 
 class BaseAdapter(ABC):
-  """Abstract base for source adapters."""
+    """Abstract base for source adapters."""
 
-  @abstractmethod
-  def stream(self, filename: str, source_dataset: str) -> Iterator[dict[str, Any]]:
-    """Stream records from a file, transformed to the unified schema.
+    @abstractmethod
+    def stream(self, filename: str, source_dataset: str) -> Iterator[dict[str, Any]]:
+        """Stream records from a file, transformed to the unified schema.
 
-    Args:
-        filename: Path to the source file.
-        source_dataset: Value for the source_dataset column.
+        Args:
+            filename: Path to the source file.
+            source_dataset: Value for the source_dataset column.
 
-    Yields:
-        Records conforming to OUTPUT_SCHEMA.
-    """
-    pass
+        Yields:
+            Records conforming to OUTPUT_SCHEMA.
+        """
+        pass
 
 
 class NemotronAdapter(BaseAdapter):
-  """Adapter for Nemotron Terminal Corpus Parquet files (Sources A & B).
+    """Adapter for Nemotron Terminal Corpus Parquet files (Sources A & B).
 
-  These files already have a 'conversations' column and full metadata.
-  Transform is trivial: drop 'trial_name' and 'source', add 'source_dataset'.
-  """
+    These files already have a 'conversations' column and full metadata.
+    Transform is trivial: drop 'trial_name' and 'source', add 'source_dataset'.
+    """
 
-  def __init__(self) -> None:
-    self._loader = ParquetLoader()
+    def __init__(self) -> None:
+        self._loader = ParquetLoader()
 
-  def stream(self, filename: str, source_dataset: str) -> Iterator[dict[str, Any]]:
-    """Stream Nemotron records with column drops and source_dataset added."""
-    for record in self._loader.load(filename):
-      out: dict[str, Any] = {}
-      for field in _SCHEMA_FIELDS:
-        if field == "source_dataset":
-          out[field] = source_dataset
-        elif field in record:
-          out[field] = record[field]
-        else:
-          out[field] = None
-      yield out
+    def stream(self, filename: str, source_dataset: str) -> Iterator[dict[str, Any]]:
+        """Stream Nemotron records with column drops and source_dataset added."""
+        for record in self._loader.load(filename):
+            out: dict[str, Any] = {}
+            for field in _SCHEMA_FIELDS:
+                if field == "source_dataset":
+                    out[field] = source_dataset
+                elif field in record:
+                    out[field] = record[field]
+                else:
+                    out[field] = None
+            # Ensure tools field is present (defaults to None for NemotronAdapter)
+            if "tools" not in out:
+                out["tools"] = None
+            yield out
 
 
 class MessagesJSONLAdapter(BaseAdapter):
-  """Adapter for JSONL files with a 'messages' key (Source C: TeichAI).
+    """Adapter for JSONL files with a 'messages' key (Source C: TeichAI).
 
-  Renames 'messages' to 'conversations' and fills metadata with defaults.
-  """
+    Renames 'messages' to 'conversations' and fills metadata with defaults.
+    """
 
-  def __init__(self) -> None:
-    self._loader = JSONLLoader()
+    def __init__(self) -> None:
+        self._loader = JSONLLoader()
 
-  def stream(self, filename: str, source_dataset: str) -> Iterator[dict[str, Any]]:
-    """Stream JSONL records, renaming messages to conversations."""
-    for record in self._loader.load(filename):
-      yield {
-        "conversations": record.get("messages", []),
-        "agent": None,
-        "model": "deepseek-ai/DeepSeek-V3.2",
-        "model_provider": None,
-        "date": None,
-        "task": None,
-        "episode": None,
-        "run_id": None,
-        "enable_thinking": True,
-        "source_dataset": source_dataset,
-      }
+    def stream(self, filename: str, source_dataset: str) -> Iterator[dict[str, Any]]:
+        """Stream JSONL records, renaming messages to conversations."""
+        for record in self._loader.load(filename):
+            yield {
+                "conversations": record.get("messages", []),
+                "agent": None,
+                "model": "deepseek-ai/DeepSeek-V3.2",
+                "model_provider": None,
+                "date": None,
+                "task": None,
+                "episode": None,
+                "run_id": None,
+                "enable_thinking": True,
+                "tools": None,
+                "source_dataset": source_dataset,
+            }
 
 
 class PromptCompletionCSVAdapter(BaseAdapter):
-  """Adapter for CSV files with 'prompt'/'completion' columns (Source D: Raiden).
+    """Adapter for CSV files with 'prompt'/'completion' columns (Source D: Raiden).
 
-  Constructs a conversations list from the prompt/completion pair and fills
-  metadata with defaults.
-  """
+    Constructs a conversations list from the prompt/completion pair and fills
+    metadata with defaults.
+    """
 
-  def __init__(self) -> None:
-    self._loader = CSVLoader()
+    def __init__(self) -> None:
+        self._loader = CSVLoader()
 
-  def stream(self, filename: str, source_dataset: str) -> Iterator[dict[str, Any]]:
-    """Stream CSV records, constructing conversations from prompt/completion."""
-    for record in self._loader.load(filename):
-      yield {
-        "conversations": [
-          {"role": "user", "content": record.get("prompt", "")},
-          {"role": "assistant", "content": record.get("completion", "")},
-        ],
-        "agent": None,
-        "model": "deepseek-ai/DeepSeek-V3.2",
-        "model_provider": None,
-        "date": None,
-        "task": None,
-        "episode": None,
-        "run_id": None,
-        "enable_thinking": True,
-        "source_dataset": source_dataset,
-      }
+    def stream(self, filename: str, source_dataset: str) -> Iterator[dict[str, Any]]:
+        """Stream CSV records, constructing conversations from prompt/completion."""
+        for record in self._loader.load(filename):
+            yield {
+                "conversations": [
+                    {"role": "user", "content": record.get("prompt", "")},
+                    {"role": "assistant", "content": record.get("completion", "")},
+                ],
+                "agent": None,
+                "model": "deepseek-ai/DeepSeek-V3.2",
+                "model_provider": None,
+                "date": None,
+                "task": None,
+                "episode": None,
+                "run_id": None,
+                "enable_thinking": True,
+                "tools": None,
+                "source_dataset": source_dataset,
+            }
+
+
+class NemotronAgenticV2Adapter(BaseAdapter):
+    """Adapter for Nemotron-SFT-Agentic-v2 JSONL files (search + tool_calling).
+
+    Ignores interactive_agent.jsonl entirely.
+    """
+
+    VALID_SUBSETS = {"search", "tool_calling"}
+
+    def __init__(self) -> None:
+        self._loader = JSONLLoader()
+
+    def stream(self, filename: str, source_dataset: str) -> Iterator[dict[str, Any]]:
+        """Stream Nemotron-SFT-Agentic-v2 records, skipping interactive_agent."""
+        # Extract subset name from source_dataset (e.g., "search" from "Nemotron-SFT-Agentic-v2-search")
+        subset = source_dataset.split("-")[-1]
+
+        # Skip interactive_agent or any unrecognized subset
+        if subset not in self.VALID_SUBSETS:
+            return
+
+        for record in self._loader.load(filename):
+            # Determine model and model_provider
+            model = record.get("model")  # Only tool_calling has this
+            model_provider = None
+            if model:
+                # Extract provider from model string, e.g., "deepseek/DeepSeek-V3.2" -> "deepseek"
+                parts = model.split("/")
+                model_provider = parts[0] if parts else None
+
+            # Determine task from domain (tool_calling) or used_in (search)
+            task = record.get("domain")
+            if not task:
+                used_in = record.get("used_in")
+                if used_in and isinstance(used_in, list):
+                    task = used_in[0] if used_in else None
+
+            yield {
+                "conversations": record["messages"],
+                "agent": None,
+                "model": model,
+                "model_provider": model_provider,
+                "date": None,  # Not present in source
+                "task": task,
+                "episode": None,
+                "run_id": record.get("uuid"),
+                "enable_thinking": record.get("parallel_tool_calls", True),
+                "tools": json.dumps(record.get("tools", [])),
+                "source_dataset": source_dataset,
+            }
 
 
 def detect_adapter(filename: str) -> BaseAdapter:
-  """Auto-detect the appropriate adapter for a data file.
+    """Auto-detect the appropriate adapter for a data file.
 
-  Uses file format detection first, then peeks at the first record
-  to inspect columns.
+    Uses file format detection first, then peeks at the first record
+    to inspect columns.
 
-  Args:
-      filename: Path to the data file.
+    Args:
+        filename: Path to the data file.
 
-  Returns:
-      An adapter instance appropriate for the file.
+    Returns:
+        An adapter instance appropriate for the file.
 
-  Raises:
-      ValueError: If no adapter matches the file's format and columns.
-  """
-  fmt = detect_format(filename)
+    Raises:
+        ValueError: If no adapter matches the file's format and columns.
+    """
+    fmt = detect_format(filename)
 
-  if fmt == "csv":
-    loader = CSVLoader()
-    for record in loader.load(filename):
-      if "prompt" in record and "completion" in record:
-        return PromptCompletionCSVAdapter()
-      raise ValueError(
-        f"CSV file '{filename}' missing 'prompt'/'completion' columns "
-        f"(found: {list(record.keys())})"
-      )
-    raise ValueError(f"CSV file '{filename}' is empty")
+    if fmt == "csv":
+        loader = CSVLoader()
+        for record in loader.load(filename):
+            if "prompt" in record and "completion" in record:
+                return PromptCompletionCSVAdapter()
+            raise ValueError(
+                f"CSV file '{filename}' missing 'prompt'/'completion' columns "
+                f"(found: {list(record.keys())})"
+            )
+        raise ValueError(f"CSV file '{filename}' is empty")
 
-  if fmt == "parquet":
-    import pyarrow.parquet as pq
-    schema = pq.read_schema(filename)
-    if "conversations" in schema.names:
-      return NemotronAdapter()
-    raise ValueError(f"Parquet file '{filename}' has no 'conversations' column")
+    if fmt == "parquet":
+        import pyarrow.parquet as pq
 
-  if fmt in ("jsonl", "json"):
-    loader = get_loader(filename)
-    for record in loader.load(filename):
-      if "messages" in record:
-        return MessagesJSONLAdapter()
-      break
-    raise ValueError(f"JSONL/JSON file '{filename}' has no 'messages' key")
+        schema = pq.read_schema(filename)
+        if "conversations" in schema.names:
+            return NemotronAdapter()
+        raise ValueError(f"Parquet file '{filename}' has no 'conversations' column")
 
-  raise ValueError(f"No adapter available for format '{fmt}'")
+    if fmt in ("jsonl", "json"):
+        loader = get_loader(filename)
+        for record in loader.load(filename):
+            if "messages" in record:
+                # Check for Nemotron-SFT-Agentic-v2 specific files
+                if "Nemotron-SFT-Agentic-v2" in filename:
+                    return NemotronAgenticV2Adapter()
+                return MessagesJSONLAdapter()
+            break
+        raise ValueError(f"JSONL/JSON file '{filename}' has no 'messages' key")
+
+    raise ValueError(f"No adapter available for format '{fmt}'")
