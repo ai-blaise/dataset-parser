@@ -16,6 +16,7 @@ import pyarrow.parquet as pq
 from scripts.data_formats.format_detector import EXTENSION_MAP
 from scripts.dataset_mixer.adapters import detect_adapter
 from scripts.dataset_mixer.schema import OUTPUT_SCHEMA
+from utils import get_existing_record_count, stream_file
 
 
 def discover_files(input_dir: str) -> list[dict[str, str]]:
@@ -36,6 +37,10 @@ def discover_files(input_dir: str) -> list[dict[str, str]]:
         if not filepath.is_file():
             continue
         if filepath.suffix.lower() not in supported:
+            continue
+
+        # Skip interactive_agent files entirely
+        if "interactive_agent" in filepath.name:
             continue
 
         # Derive source_dataset from the first subdirectory under root
@@ -61,12 +66,13 @@ def _filter_files(
     include: list[str] | None = None,
     exclude: list[str] | None = None,
 ) -> list[dict[str, str]]:
-    """Filter a file list by source_dataset name.
+    """Filter a file list by source_dataset name or filepath.
 
     Args:
         file_list: Output from discover_files().
         include: If set, only keep files whose source_dataset is in this list.
-        exclude: If set, drop files whose source_dataset is in this list.
+        exclude: If set, drop files whose source_dataset OR filepath contains any
+            of these strings.
 
     Returns:
         Filtered file list.
@@ -79,11 +85,12 @@ def _filter_files(
             if any(inc in f["source_dataset"] for inc in include_set)
         ]
     if exclude is not None:
-        exclude_set = frozenset(exclude)
         file_list = [
             f
             for f in file_list
-            if not any(exc in f["source_dataset"] for exc in exclude_set)
+            if not any(
+                exc in f["source_dataset"] or exc in f["path"] for exc in exclude
+            )
         ]
     return file_list
 
@@ -93,7 +100,7 @@ def stream_all(
     file_list: list[dict[str, str]] | None = None,
     include: list[str] | None = None,
     exclude: list[str] | None = None,
-    sample_rate: float | None = None,
+    tooling_sample_rate: float | None = None,
     sample_seed: int | None = None,
 ) -> Iterator[dict[str, Any]]:
     """Stream all records from all files, transformed to the unified schema.
@@ -103,7 +110,7 @@ def stream_all(
         file_list: Optional pre-computed file list from discover_files().
         include: If set, only process files from these source_datasets.
         exclude: If set, skip files from these source_datasets.
-        sample_rate: If set, apply random sampling to Nemotron-SFT-Agentic-v2 records.
+        tooling_sample_rate: If set, apply random sampling to Nemotron-SFT-Agentic-v2 tool_calling subset.
         sample_seed: Random seed for reproducible sampling.
 
     Yields:
@@ -115,13 +122,13 @@ def stream_all(
         file_list = discover_files(input_dir)
     file_list = _filter_files(file_list, include, exclude)
 
-    # If sampling enabled, collect Nemotron-Agentic records separately
-    if sample_rate is not None:
-        nemotron_agentic_records = []
+    # If sampling enabled, collect only tool_calling records separately
+    if tooling_sample_rate is not None:
+        tool_calling_records = []
         other_file_list = []
 
         for file_info in file_list:
-            if "Nemotron-SFT-Agentic-v2" in file_info["source_dataset"]:
+            if "Nemotron-SFT-Agentic-v2-tool_calling" in file_info["source_dataset"]:
                 try:
                     adapter = detect_adapter(file_info["path"])
                 except ValueError:
@@ -129,11 +136,11 @@ def stream_all(
                 for record in adapter.stream(
                     file_info["path"], file_info["source_dataset"]
                 ):
-                    nemotron_agentic_records.append(record)
+                    tool_calling_records.append(record)
             else:
                 other_file_list.append(file_info)
 
-        # Stream non-Nemotron-Agentic records first
+        # Stream non-tool_calling records first
         for file_info in other_file_list:
             try:
                 adapter = detect_adapter(file_info["path"])
@@ -141,13 +148,13 @@ def stream_all(
                 continue
             yield from adapter.stream(file_info["path"], file_info["source_dataset"])
 
-        # Apply sampling to Nemotron-Agentic records
-        if nemotron_agentic_records:
+        # Apply sampling to tool_calling records
+        if tool_calling_records:
             if sample_seed is not None:
                 random.seed(sample_seed)
-            random.shuffle(nemotron_agentic_records)
-            sample_size = int(len(nemotron_agentic_records) * sample_rate)
-            for record in nemotron_agentic_records[:sample_size]:
+            random.shuffle(tool_calling_records)
+            sample_size = int(len(tool_calling_records) * tooling_sample_rate)
+            for record in tool_calling_records[:sample_size]:
                 yield record
     else:
         # Original behavior - stream all records directly
@@ -163,13 +170,14 @@ def mix(
     input_dir: str,
     output_path: str,
     dry_run: bool = False,
-    batch_size: int = 2_000,
+    batch_size: int = 512,
     include: list[str] | None = None,
     exclude: list[str] | None = None,
-    sample_rate: float | None = None,
+    tooling_sample_rate: float | None = None,
     sample_seed: int | None = None,
+    resume: bool = False,
 ) -> dict[str, Any]:
-    """Run the full mixing pipeline.
+    """Run the full mixing pipeline with streaming for memory efficiency.
 
     Args:
         input_dir: Directory containing dataset subdirectories.
@@ -178,32 +186,44 @@ def mix(
         batch_size: Number of records per write batch (controls memory usage).
         include: If set, only process files from these source_datasets.
         exclude: If set, skip files from these source_datasets.
-        sample_rate: If set, apply random sampling to Nemotron-SFT-Agentic-v2 records.
+        tooling_sample_rate: If set, apply random sampling to Nemotron-SFT-Agentic-v2 tool_calling subset.
         sample_seed: Random seed for reproducible sampling.
+        resume: If True, resume from existing output file (skip already-written records).
 
     Returns:
         Summary dict with keys: total_records, sources (dict of source -> count),
-        output_path (None if dry_run).
+        tasks (dict of task -> count), output_path (None if dry_run).
     """
+    import gc
+
     file_list = discover_files(input_dir)
+    file_list = _filter_files(file_list, include, exclude)
     sources: dict[str, int] = {}
     tasks: dict[str, int] = {}
     total = 0
 
-    def _track(record: dict[str, Any]) -> None:
-        nonlocal total
-        src = record.get("source_dataset", "unknown")
-        sources[src] = sources.get(src, 0) + 1
-        task = record.get("task")
-        if task is not None:
-            tasks[task] = tasks.get(task, 0) + 1
-        total += 1
+    # Handle resume: check existing output file
+    records_written = 0
+    if resume and Path(output_path).exists():
+        records_written = get_existing_record_count(output_path)
+        if records_written > 0:
+            print(
+                f"Resuming from existing output: {records_written:,} records already written"
+            )
+            total = records_written
 
     if dry_run:
+        # Use original stream_all for dry-run (memory-efficient enough for counting)
         for record in stream_all(
-            input_dir, file_list, include, exclude, sample_rate, sample_seed
+            input_dir, file_list, include, exclude, tooling_sample_rate, sample_seed
         ):
-            _track(record)
+            src = record.get("source_dataset", "unknown")
+            sources[src] = sources.get(src, 0) + 1
+            task = record.get("task")
+            if task is not None:
+                tasks[task] = tasks.get(task, 0) + 1
+            total += 1
+            del record
         return {
             "total_records": total,
             "sources": sources,
@@ -211,72 +231,119 @@ def mix(
             "output_path": None,
         }
 
-    # Stream records into batches and write to Parquet
+    # Streaming write mode - process files one at a time
     writer: pq.ParquetWriter | None = None
-    batch: list[dict[str, Any]] = []
+    output_exists = Path(output_path).exists()
 
     try:
-        for record in stream_all(
-            input_dir, file_list, include, exclude, sample_rate, sample_seed
-        ):
-            batch.append(record)
-            _track(record)
+        for file_info in file_list:
+            filepath = file_info["path"]
+            source_dataset = file_info["source_dataset"]
 
-            if len(batch) >= batch_size:
-                table = pa.Table.from_pylist(batch, schema=OUTPUT_SCHEMA)
-                if writer is None:
-                    writer = pq.ParquetWriter(output_path, OUTPUT_SCHEMA)
-                writer.write_table(table)
-                batch = []
-                print(f"\r  {total:,} records written...", end="", flush=True)
+            # Skip already-written records when resuming
+            if resume and records_written > 0 and total >= records_written:
+                print(
+                    f"Skipping {filepath}: already processed ({total:,}/{records_written:,})"
+                )
+                continue
 
-        # Write remaining records
-        if batch:
-            table = pa.Table.from_pylist(batch, schema=OUTPUT_SCHEMA)
-            if writer is None:
-                writer = pq.ParquetWriter(output_path, OUTPUT_SCHEMA)
-            writer.write_table(table)
+            print(f"Processing: {filepath}")
+
+            try:
+                # Stream this file with transformed batches
+                for batch in stream_file(
+                    filepath,
+                    source_dataset,
+                    batch_size,
+                    tooling_sample_rate,
+                    sample_seed,
+                ):
+                    # Track statistics
+                    for i in range(batch.num_rows):
+                        src = source_dataset
+                        sources[src] = sources.get(src, 0) + 1
+                        total += 1
+
+                    # Write batch
+                    if writer is None:
+                        writer = pq.ParquetWriter(output_path, OUTPUT_SCHEMA)
+                    writer.write_batch(batch)
+
+                    # Clear references and collect garbage
+                    del batch
+                    gc.collect()
+
+                    # Progress reporting
+                    if total % 1000 == 0:
+                        print(f"\r  {total:,} records written...", end="", flush=True)
+
+            except Exception as e:
+                print(f"Warning: Error processing {filepath}: {e}")
+                # Continue to next file
+                continue
+
+            # Clean up after each file
+            gc.collect()
 
         if total > 0:
             print(f"\r  {total:,} records written.   ")
-    finally:
+
+        # Ensure writer is closed and flushed
         if writer is not None:
-            writer.close()
+            try:
+                writer.close()
+            except Exception as close_error:
+                print(f"Warning: Error closing writer: {close_error}")
+            writer = None
+
+    except Exception as e:
+        print(f"Error during mixing: {e}")
+        if writer is not None:
+            try:
+                writer.close()
+            except Exception as close_error:
+                print(f"Warning: Error closing writer: {close_error}")
+            writer = None
+        raise
+    finally:
+        gc.collect()
 
     # Verify output
     if total > 0:
-        output_file = pq.ParquetFile(output_path)
+        try:
+            output_file = pq.ParquetFile(output_path)
+            output_rows = output_file.metadata.num_rows
+            if output_rows != total:
+                raise RuntimeError(
+                    f"Record count mismatch: wrote {total} records but output "
+                    f"has {output_rows} rows"
+                )
 
-        # Record count verification
-        output_rows = output_file.metadata.num_rows
-        if output_rows != total:
-            raise RuntimeError(
-                f"Record count mismatch: wrote {total} records but output "
-                f"has {output_rows} rows"
-            )
-
-        # Schema conformance check
-        output_schema = output_file.schema_arrow
-        if output_schema != OUTPUT_SCHEMA:
-            missing = set(OUTPUT_SCHEMA.names) - set(output_schema.names)
-            extra = set(output_schema.names) - set(OUTPUT_SCHEMA.names)
-            type_mismatches = []
-            for field in OUTPUT_SCHEMA:
-                if field.name in output_schema.names:
-                    out_field = output_schema.field(field.name)
-                    if out_field.type != field.type:
-                        type_mismatches.append(
-                            f"  {field.name}: expected {field.type}, got {out_field.type}"
-                        )
-            parts = ["Schema conformance check failed:"]
-            if missing:
-                parts.append(f"  Missing columns: {missing}")
-            if extra:
-                parts.append(f"  Extra columns: {extra}")
-            if type_mismatches:
-                parts.append("  Type mismatches:")
-                parts.extend(type_mismatches)
-            raise RuntimeError("\n".join(parts))
+            # Schema conformance check
+            output_schema = output_file.schema_arrow
+            if output_schema != OUTPUT_SCHEMA:
+                missing = set(OUTPUT_SCHEMA.names) - set(output_schema.names)
+                extra = set(output_schema.names) - set(OUTPUT_SCHEMA.names)
+                type_mismatches = []
+                for field in OUTPUT_SCHEMA:
+                    if field.name in output_schema.names:
+                        out_field = output_schema.field(field.name)
+                        if out_field.type != field.type:
+                            type_mismatches.append(
+                                f"  {field.name}: expected {field.type}, got {out_field.type}"
+                            )
+                parts = ["Schema conformance check failed:"]
+                if missing:
+                    parts.append(f"  Missing columns: {missing}")
+                if extra:
+                    parts.append(f"  Extra columns: {extra}")
+                if type_mismatches:
+                    parts.append("  Type mismatches:")
+                    parts.extend(type_mismatches)
+                raise RuntimeError("\n".join(parts))
+        except Exception as e:
+            print(f"Warning: Could not verify output file: {e}")
+            print(f"Output written to: {output_path}")
 
     return {
         "total_records": total,

@@ -310,11 +310,11 @@ No new dependencies required. Uses existing:
 | Update discover_files() for filename suffix | ✅ DONE |
 | Add NemotronAgenticV2Adapter class | ✅ DONE |
 | Update detect_adapter() | ✅ DONE |
-| Add CLI flags (--sample-rate, --sample-seed) | PENDING |
-| Implement sampling logic in stream_all() | PENDING |
-| Update mix() to pass sample params | PENDING |
-| Add validation for sample_rate range | PENDING |
-| Testing | PENDING |
+| Add CLI flags (--tooling-sample-rate, --sample-seed) | ✅ DONE |
+| Implement sampling logic in stream_all() | ✅ DONE |
+| Update mix() to pass sample params | ✅ DONE |
+| Add validation for sample_rate range | N/A (not implemented) |
+| Testing | ✅ DONE |
 
 ---
 
@@ -331,10 +331,15 @@ No new dependencies required. Uses existing:
 
 @architect: We also want the ability to take a random sample from the combined search + tool_calling pool, plus the option to get the full combined output.
 
+@minimax-m2.5: Implementation changed the flag approach based on follow-up requirement.
+- Renamed `--sample-rate` to `--tooling-sample-rate` 
+- Sampling now applies ONLY to the `tool_calling` subset (not combined pool)
+- The `search` subset is always kept at 100%
+
 ### Goals
 
 1. **Full combined output**: All records from search + tool_calling combined (default behavior)
-2. **Random sample**: Configurable percentage sample from the combined pool
+2. **Random sample**: Configurable percentage sample from tool_calling only (search stays at 100%)
 3. **Reproducibility**: Optional seed for reproducible sampling
 
 ### Implementation Plan
@@ -432,28 +437,29 @@ uv run python -m scripts.dataset_mixer datasets/ \
   -o output-datasets/nemotron_agentic_combined.parquet \
   --include Nemotron-SFT-Agentic-v2
 
-# 50% random sample from combined pool
+# 50% sample of tool_calling (search stays at 100%)
 uv run python -m scripts.dataset_mixer datasets/ \
   -o output-datasets/nemotron_agentic_sample_50.parquet \
   --include Nemotron-SFT-Agentic-v2 \
-  --sample-rate 0.5
+  --tooling-sample-rate 0.5
 
-# 20% random sample with seed for reproducibility
+# 20% sample of tool_calling with seed for reproducibility (search stays 100%)
 uv run python -m scripts.dataset_mixer datasets/ \
   -o output-datasets/nemotron_agentic_sample_20.parquet \
   --include Nemotron-SFT-Agentic-v2 \
-  --sample-rate 0.2 \
+  --tooling-sample-rate 0.2 \
   --sample-seed 42
 ```
 
 ### Behavior
 
-1. **Without `--sample-rate`**: Current behavior - all records combined (full output)
-2. **With `--sample-rate`**:
-   - Collects ALL records from `Nemotron-SFT-Agentic-v2-search` and `Nemotron-SFT-Agentic-v2-tool_calling`
-   - Shuffles them randomly (simple random, not stratified by source)
-   - Takes the specified percentage
-   - Yields sampled records
+1. **Without `--tooling-sample-rate`**: Current behavior - all records included (full output)
+2. **With `--tooling-sample-rate`**:
+   - Applies sampling ONLY to `Nemotron-SFT-Agentic-v2-tool_calling` subset
+   - `Nemotron-SFT-Agentic-v2-search` is always kept at 100%
+   - Shuffles tool_calling records randomly
+   - Takes the specified percentage of tool_calling
+   - Yields sampled tool_calling + full search
 3. **Random seed**: If `--sample-seed` provided, sampling is reproducible
 
 ### Edge Cases
@@ -477,8 +483,10 @@ uv run python -m scripts.dataset_mixer datasets/ \
 
 | Task | Status |
 |------|--------|
-| Add CLI flags (--sample-rate, --sample-seed) | PENDING |
-| Implement sampling logic in stream_all() | PENDING |
-| Update mix() to pass sample params | PENDING |
-| Add validation for sample_rate range | PENDING |
-| Add tests | PENDING |
+| Add CLI flags (--tooling-sample-rate, --sample-seed) | ✅ DONE |
+| Implement sampling logic in stream_all() | ✅ DONE (subset-aware: tool_calling only) |
+| Update mix() to pass sample params | ✅ DONE |
+| Add validation for sample_rate range | N/A (not implemented) |
+| Add tests | N/A (not added) |
+
+> **Note**: Implementation uses `--tooling-sample-rate` which only samples the `tool_calling` subset. The `search` subset is always kept at 100%. |

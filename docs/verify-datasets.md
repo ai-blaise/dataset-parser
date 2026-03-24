@@ -7,50 +7,57 @@ This guide covers how to verify that the mixed training datasets in `output-data
 Generate the mixed outputs first:
 
 ```bash
-# All data combined
-uv run python -m scripts.dataset_mixer datasets/ -o output-datasets/full_mix_all_sources.parquet
+# Full Nemotron family (~380K records)
+# Combines Terminal Corpus (100%) + Agentic v2 (100%)
+uv run python -m scripts.dataset_mixer datasets/ -o output-datasets/nemotron_full_family.parquet \
+  --include Nemotron
 
-# Nemotron only (adapters + synthetic tasks)
+# Nemotron Terminal Corpus only (~366K records)
 uv run python -m scripts.dataset_mixer datasets/ -o output-datasets/nemotron_terminal_corpus_only.parquet \
   --include Nemotron-Terminal-Corpus
 
-# TeichAI + Raiden (non-Nemotron)
-uv run python -m scripts.dataset_mixer datasets/ -o output-datasets/teichai_raiden_no_nemotron.parquet \
-  --exclude Nemotron-Terminal-Corpus
+# Nemotron-SFT-Agentic-v2 only (~14K records)
+# This includes search + tool_calling (excludes interactive_agent)
+uv run python -m scripts.dataset_mixer datasets/ -o output-datasets/nemotron_agentic_v2_combined.parquet \
+  --include Nemotron-SFT-Agentic-v2
+
+# Full family with 40% sampling on tool_calling only (search stays 100%)
+uv run python -m scripts.dataset_mixer datasets/ -o output-datasets/nemotron_mixed_40.parquet \
+  --include Nemotron \
+  --tooling-sample-rate 0.40 \
+  --sample-seed 42
+
+# Sampled Agentic v2 examples (tool_calling only, search stays 100%)
+uv run python -m scripts.dataset_mixer datasets/ -o output-datasets/nemotron_agentic_v2_sample_50.parquet \
+  --include Nemotron-SFT-Agentic-v2 \
+  --tooling-sample-rate 0.5
+
+uv run python -m scripts.dataset_mixer datasets/ -o output-datasets/nemotron_agentic_v2_sample_40.parquet \
+  --include Nemotron-SFT-Agentic-v2 \
+  --tooling-sample-rate 0.40 \
+  --sample-seed 42
+```
+
+## Preview Before Mixing
+
+Use `--dry-run` to see record counts without writing output:
+
+```bash
+# Preview all Nemotron family
+uv run python -m scripts.dataset_mixer datasets/ --dry-run --include Nemotron
+
+# Preview Agentic v2 only
+uv run python -m scripts.dataset_mixer datasets/ --dry-run --include Nemotron-SFT-Agentic-v2
+
+# Preview Terminal Corpus only
+uv run python -m scripts.dataset_mixer datasets/ --dry-run --include Nemotron-Terminal-Corpus
 ```
 
 ## Side-by-Side Comparison (TUI)
 
 Use `--compare` to launch the dual-pane TUI with a source dataset on the left and the mixed output on the right. Both paths must be directories.
 
-### Compare TeichAI source against mixed output
-
-```bash
-uv run python -m scripts.tui.app datasets/deepseek-v3.2-speciale-openr1-math-3k/ \
-  --compare output-datasets/
-```
-
-**What to verify:**
-- Each TeichAI record has `messages` (source) mapped to `conversations` (output)
-- Assistant content contains `<think>` reasoning chains (not empty)
-- System prompts are preserved as empty strings (not dropped)
-- Record count: 3,317
-
-### Compare Raiden source against mixed output
-
-```bash
-uv run python -m scripts.tui.app datasets/Raiden-Mini-DeepSeek-V3.2-Speciale/ \
-  --compare output-datasets/
-```
-
-**What to verify:**
-- Only `Raiden_Mini_DS3.2_Speciale.csv` is included (8,041 records)
-- `Raiden_Mini_Comparative.csv` is excluded (different column schema — no `completion` column)
-- Each conversation has exactly 2 messages: user (prompt) + assistant (completion)
-- Assistant content contains `<think>` reasoning chains (not empty)
-- Large completions (up to 124K chars) are not truncated
-
-### Compare Nemotron source against mixed output
+### Compare Nemotron Terminal Corpus source against mixed output
 
 ```bash
 uv run python -m scripts.tui.app datasets/Nemotron-Terminal-Corpus/ \
@@ -63,19 +70,33 @@ uv run python -m scripts.tui.app datasets/Nemotron-Terminal-Corpus/ \
 - Metadata columns (`agent`, `model`, `model_provider`, `task`, etc.) are preserved
 - `trial_name` and `source` columns are dropped from the output
 
+### Compare Nemotron-SFT-Agentic-v2 source against mixed output
+
+```bash
+uv run python -m scripts.tui.app datasets/Nemotron-SFT-Agentic-v2/ \
+  --compare output-datasets/
+```
+
+**What to verify:**
+- Only `search.jsonl` and `tool_calling.jsonl` are included
+- `interactive_agent.jsonl` is excluded (adapter skips it)
+- Conversations are transformed from `messages` to `conversations` format
+- Tools definitions are preserved in JSON format
+
 ## Browse a Single Mixed Output
 
 To inspect a mixed parquet without comparison:
 
 ```bash
-# Browse the full mix
-uv run python -m scripts.tui.app output-datasets/full_mix_all_sources.parquet
+# Browse full Nemotron family
+uv run python -m scripts.tui.app output-datasets/nemotron_full_family.parquet
 
-# Browse Nemotron-only mix
+# Browse Nemotron Terminal Corpus only
 uv run python -m scripts.tui.app output-datasets/nemotron_terminal_corpus_only.parquet
 
-# Browse TeichAI + Raiden mix
-uv run python -m scripts.tui.app output-datasets/teichai_raiden_no_nemotron.parquet
+# Browse Agentic v2 (sampled or full)
+uv run python -m scripts.tui.app output-datasets/nemotron_agentic_v2_combined.parquet
+uv run python -m scripts.tui.app output-datasets/nemotron_agentic_v2_sample_40.parquet
 ```
 
 ## TUI Keybindings (Comparison Mode)
@@ -106,8 +127,7 @@ uv run python -m pytest tests/test_dataset_mixer.py::TestSourceFiltering -v
 
 Key test classes:
 - `TestNemotronAdapterIntegrity` — conversations pass through unchanged
-- `TestMessagesJSONLAdapterIntegrity` — messages renamed to conversations, content preserved
-- `TestPromptCompletionCSVAdapterIntegrity` — prompt becomes user content, completion becomes assistant content
+- `TestNemotronAgenticV2AdapterIntegrity` — messages transformed to conversations
 - `TestMixOutputIntegrity` — end-to-end mix verification (schema, counts, round-trip)
 - `TestSourceFiltering` — include/exclude filtering produces correct subsets
 
@@ -116,25 +136,29 @@ Key test classes:
 Preview record counts per source without writing files:
 
 ```bash
-# All sources
+# All sources (Nemotron family)
 uv run python -m scripts.dataset_mixer datasets/ --dry-run
 
-# Nemotron only
+# Nemotron family with include
+uv run python -m scripts.dataset_mixer datasets/ --dry-run --include Nemotron
+
+# Terminal Corpus only
 uv run python -m scripts.dataset_mixer datasets/ --dry-run --include Nemotron-Terminal-Corpus
 
-# Non-Nemotron
-uv run python -m scripts.dataset_mixer datasets/ --dry-run --exclude Nemotron-Terminal-Corpus
+# Agentic v2 only
+uv run python -m scripts.dataset_mixer datasets/ --dry-run --include Nemotron-SFT-Agentic-v2
 ```
 
 ## Expected Record Counts
 
 | Mix | Source | Records |
 |-----|--------|---------|
-| Full | Nemotron Terminal Corpus | ~368,413 |
-| Full | TeichAI math-3k | 3,317 |
-| Full | Raiden Speciale | 8,041 |
-| **Full total** | | **~379,771** |
-| Nemotron only | Nemotron Terminal Corpus | ~368,413 |
-| Non-Nemotron | TeichAI + Raiden | 11,358 |
+| Full family | Nemotron Terminal Corpus | ~366,154 |
+| Full family | Nemotron-SFT-Agentic-v2 (search) | 5,968 |
+| Full family | Nemotron-SFT-Agentic-v2 (tool_calling) | 8,443 |
+| **Full family total** | | **~380,565** |
+| Terminal Corpus only | Nemotron-Terminal-Corpus | ~366,154 |
+| Agentic v2 only | Nemotron-SFT-Agentic-v2 | ~14,411 |
+| Agentic v2 40% sample | Nemotron-SFT-Agentic-v2 | ~5,764 |
 
-> **Note:** `Raiden_Mini_Comparative.csv` (8,041 rows) is automatically excluded because it lacks `prompt`/`completion` columns. It contains the same prompts as the Speciale CSV but with two alternative model completions under different column names (`v3.2_speciale_completion`, `v3.2_completion`).
+> **Note:** `interactive_agent.jsonl` in Nemotron-SFT-Agentic-v2 is automatically excluded by the adapter. Only `search.jsonl` and `tool_calling.jsonl` are processed.

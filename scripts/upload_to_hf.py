@@ -1,8 +1,8 @@
 """
 Upload output-datasets/ to HuggingFace Hub.
 
-Uses the Python API instead of the hf CLI to avoid OOM on large files —
-the CLI hashes the entire file into memory, but the Python API streams.
+Uses upload_large_folder for robust handling of large files (~8GB) -
+resumable, multi-threaded, and handles failures gracefully.
 
 Usage:
     uv run python scripts/upload_to_hf.py
@@ -12,6 +12,7 @@ Requires: hf auth login (run beforehand)
 
 import os
 import sys
+from pathlib import Path
 
 from huggingface_hub import HfApi
 
@@ -30,37 +31,40 @@ def main():
         print(f"Not authenticated. Run 'hf auth login' first.\n{e}")
         sys.exit(1)
 
-    # Collect all files to upload
-    files = sorted(os.listdir(LOCAL_DIR))
-    files = [f for f in files if os.path.isfile(os.path.join(LOCAL_DIR, f))]
+    # Collect all files to upload (parquet + markdown)
+    folder = Path(LOCAL_DIR)
+    all_files = set()
+
+    # Find all parquet files
+    for f in folder.glob("**/*.parquet"):
+        all_files.add(f)
+    # Find all markdown files (README.md, etc.)
+    for f in folder.glob("**/*.md"):
+        all_files.add(f)
+
+    files = sorted(all_files, key=lambda x: x.name)
 
     print(f"\nRepo: {REPO_ID}")
     print(f"Files to upload ({len(files)}):")
     for f in files:
-        size_gb = os.path.getsize(os.path.join(LOCAL_DIR, f)) / (1024**3)
-        print(f"  {f} ({size_gb:.2f} GB)")
+        size_gb = f.stat().st_size / 1e9
+        print(f"  {f.name} ({size_gb:.2f} GB)")
     print()
 
-    # Upload each file individually to avoid OOM
-    for i, filename in enumerate(files, 1):
-        filepath = os.path.join(LOCAL_DIR, filename)
-        size_gb = os.path.getsize(filepath) / (1024**3)
-        print(f"[{i}/{len(files)}] Uploading {filename} ({size_gb:.2f} GB)...")
-
-        try:
-            api.upload_file(
-                path_or_fileobj=filepath,
-                path_in_repo=filename,
-                repo_id=REPO_ID,
-                repo_type="dataset",
-                commit_message=f"Upload {filename}",
-            )
-            print(f"  Done.")
-        except Exception as e:
-            print(f"  FAILED: {e}")
-            sys.exit(1)
-
-    print(f"\nAll {len(files)} files uploaded to https://huggingface.co/datasets/{REPO_ID}")
+    # Upload all files in a single commit using upload_large_folder
+    print(f"Uploading {len(files)} files to {REPO_ID}...")
+    try:
+        api.upload_large_folder(
+            folder_path=str(folder),
+            repo_id=REPO_ID,
+            repo_type="dataset",
+        )
+        print(
+            f"\n✓ All {len(files)} files uploaded to https://huggingface.co/datasets/{REPO_ID}"
+        )
+    except Exception as e:
+        print(f"\n✗ Upload failed: {e}")
+        sys.exit(1)
 
 
 if __name__ == "__main__":

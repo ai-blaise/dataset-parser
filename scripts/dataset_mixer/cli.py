@@ -49,22 +49,26 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument(
         "--batch-size",
         type=int,
-        default=2_000,
-        help="Records per write batch — lower uses less memory (default: 2000)",
+        default=500,
+        help="Records per write batch — lower uses less memory (default: 500)",
     )
     parser.add_argument(
-        "--sample-rate",
+        "--tooling-sample-rate",
         type=float,
         default=None,
-        help="Random sample rate (0.0-1.0) for Nemotron-SFT-Agentic-v2. "
-        "Takes random N%% of combined search + tool_calling records. "
-        "Use --sample-seed for reproducibility.",
+        help="Random sample rate (0.0-1.0) for Nemotron-SFT-Agentic-v2 tool_calling subset. "
+        "Search subset is always kept at 100%%. Use --sample-seed for reproducibility.",
     )
     parser.add_argument(
         "--sample-seed",
         type=int,
         default=None,
-        help="Random seed for --sample-rate reproducibility.",
+        help="Random seed for --tooling-sample-rate reproducibility.",
+    )
+    parser.add_argument(
+        "--resume",
+        action="store_true",
+        help="Resume from existing output file if present (skip already-written records)",
     )
 
     args = parser.parse_args(argv)
@@ -87,8 +91,9 @@ def main(argv: list[str] | None = None) -> None:
         batch_size=args.batch_size,
         include=args.include,
         exclude=args.exclude,
-        sample_rate=args.sample_rate,
+        tooling_sample_rate=args.tooling_sample_rate,
         sample_seed=args.sample_seed,
+        resume=args.resume,
     )
 
     # Print summary

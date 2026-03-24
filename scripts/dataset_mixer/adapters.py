@@ -30,11 +30,13 @@ class BaseAdapter(ABC):
     """Abstract base for source adapters."""
 
     @abstractmethod
-    def stream(self, filename: str, source_dataset: str) -> Iterator[dict[str, Any]]:
-        """Stream records from a file, transformed to the unified schema.
+    def transform_records(
+        self, records: Iterator[dict[str, Any]], source_dataset: str
+    ) -> Iterator[dict[str, Any]]:
+        """Transform raw records to the unified schema.
 
         Args:
-            filename: Path to the source file.
+            records: Iterator of raw records from any source format.
             source_dataset: Value for the source_dataset column.
 
         Yields:
@@ -50,12 +52,11 @@ class NemotronAdapter(BaseAdapter):
     Transform is trivial: drop 'trial_name' and 'source', add 'source_dataset'.
     """
 
-    def __init__(self) -> None:
-        self._loader = ParquetLoader()
-
-    def stream(self, filename: str, source_dataset: str) -> Iterator[dict[str, Any]]:
-        """Stream Nemotron records with column drops and source_dataset added."""
-        for record in self._loader.load(filename):
+    def transform_records(
+        self, records: Iterator[dict[str, Any]], source_dataset: str
+    ) -> Iterator[dict[str, Any]]:
+        """Transform Nemotron records with column drops and source_dataset added."""
+        for record in records:
             out: dict[str, Any] = {}
             for field in _SCHEMA_FIELDS:
                 if field == "source_dataset":
@@ -76,12 +77,11 @@ class MessagesJSONLAdapter(BaseAdapter):
     Renames 'messages' to 'conversations' and fills metadata with defaults.
     """
 
-    def __init__(self) -> None:
-        self._loader = JSONLLoader()
-
-    def stream(self, filename: str, source_dataset: str) -> Iterator[dict[str, Any]]:
-        """Stream JSONL records, renaming messages to conversations."""
-        for record in self._loader.load(filename):
+    def transform_records(
+        self, records: Iterator[dict[str, Any]], source_dataset: str
+    ) -> Iterator[dict[str, Any]]:
+        """Transform JSONL records, renaming messages to conversations."""
+        for record in records:
             yield {
                 "conversations": record.get("messages", []),
                 "agent": None,
@@ -104,12 +104,11 @@ class PromptCompletionCSVAdapter(BaseAdapter):
     metadata with defaults.
     """
 
-    def __init__(self) -> None:
-        self._loader = CSVLoader()
-
-    def stream(self, filename: str, source_dataset: str) -> Iterator[dict[str, Any]]:
-        """Stream CSV records, constructing conversations from prompt/completion."""
-        for record in self._loader.load(filename):
+    def transform_records(
+        self, records: Iterator[dict[str, Any]], source_dataset: str
+    ) -> Iterator[dict[str, Any]]:
+        """Transform CSV records, constructing conversations from prompt/completion."""
+        for record in records:
             yield {
                 "conversations": [
                     {"role": "user", "content": record.get("prompt", "")},
@@ -136,11 +135,10 @@ class NemotronAgenticV2Adapter(BaseAdapter):
 
     VALID_SUBSETS = {"search", "tool_calling"}
 
-    def __init__(self) -> None:
-        self._loader = JSONLLoader()
-
-    def stream(self, filename: str, source_dataset: str) -> Iterator[dict[str, Any]]:
-        """Stream Nemotron-SFT-Agentic-v2 records, skipping interactive_agent."""
+    def transform_records(
+        self, records: Iterator[dict[str, Any]], source_dataset: str
+    ) -> Iterator[dict[str, Any]]:
+        """Transform Nemotron-SFT-Agentic-v2 records, skipping interactive_agent."""
         # Extract subset name from source_dataset (e.g., "search" from "Nemotron-SFT-Agentic-v2-search")
         subset = source_dataset.split("-")[-1]
 
@@ -148,7 +146,7 @@ class NemotronAgenticV2Adapter(BaseAdapter):
         if subset not in self.VALID_SUBSETS:
             return
 
-        for record in self._loader.load(filename):
+        for record in records:
             # Determine model and model_provider
             model = record.get("model")  # Only tool_calling has this
             model_provider = None

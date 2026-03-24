@@ -262,6 +262,155 @@ uv run python -m scripts.parser_finale dataset/train.jsonl --has-tools -O parsed
 
 ---
 
+## Dataset Mixer
+
+The dataset mixer combines multiple HuggingFace datasets into a single unified Parquet training file.
+
+```bash
+uv run python -m scripts.dataset_mixer <input_dir> [options]
+```
+
+### Arguments
+
+| Argument | Description |
+|----------|-------------|
+| `input_dir` | Root directory containing dataset subdirectories |
+
+### Options
+
+| Option | Description |
+|--------|-------------|
+| `-o, --output PATH` | Output Parquet file path (default: `mixed_output.parquet`) |
+| `--dry-run` | Show record counts without writing output |
+| `--include [SOURCE ...]` | Only include datasets matching these prefixes (supports prefix matching) |
+| `--exclude [SOURCE ...]` | Exclude datasets matching these prefixes |
+| `--batch-size N` | Records per write batch for memory control (default: 2000) |
+| `--tooling-sample-rate RATE` | Random sample rate (0.0-1.0) for Nemotron-SFT-Agentic-v2 tool_calling subset only (search is always 100%) |
+| `--sample-seed SEED` | Random seed for reproducible sampling |
+
+### Source Filtering
+
+The `--include` and `--exclude` flags filter which datasets to process. They support **prefix matching**, so you can use partial names:
+
+- `--include Nemotron` matches both `Nemotron-Terminal-Corpus` AND `Nemotron-SFT-Agentic-v2-*`
+- `--include Nemotron-SFT-Agentic-v2` matches `Nemotron-SFT-Agentic-v2-search` and `Nemotron-SFT-Agentic-v2-tool_calling`
+
+#### Available Source Prefixes
+
+| Prefix | Description |
+|--------|-------------|
+| `Nemotron` | All Nemotron family (Terminal Corpus + Agentic v2) |
+| `Nemotron-Terminal-Corpus` | Only Terminal Corpus (adapters + synthetic tasks) |
+| `Nemotron-SFT-Agentic-v2` | Only Agentic v2 (search + tool_calling) |
+| `Nemotron-SFT-Agentic-v2-search` | Only search subset |
+| `Nemotron-SFT-Agentic-v2-tool_calling` | Only tool_calling subset |
+| `TeichAI` or `deepseek-v3.2-speciale-openr1-math-3k` | Math reasoning dataset |
+| `Raiden` or `Raiden-Mini-DeepSeek-V3.2-Speciale` | Creative/analytic prompts |
+
+### Random Sampling
+
+The `--tooling-sample-rate` option applies random sampling **only** to the `Nemotron-SFT-Agentic-v2-tool_calling` subset. The `search` subset is always kept at 100%. Other sources (like Nemotron-Terminal-Corpus) are always included at 100%.
+
+- `--tooling-sample-rate 0.5` = 50% of tool_calling records (100% of search)
+- `--tooling-sample-rate 0.4` = 40% of tool_calling records (100% of search)
+- `--tooling-sample-rate 0.2` = 20% of tool_calling records (100% of search)
+
+Use `--sample-seed` for reproducibility (e.g., `--sample-seed 42`).
+
+### Examples
+
+#### Basic Usage
+
+```bash
+# Mix all datasets into single file
+uv run python -m scripts.dataset_mixer datasets/ -o output.parquet
+
+# Preview what will be included
+uv run python -m scripts.dataset_mixer datasets/ --dry-run
+```
+
+#### Filter by Source
+
+```bash
+# Only Nemotron family (prefix matching)
+uv run python -m scripts.dataset_mixer datasets/ -o nemotron.parquet --include Nemotron
+
+# Only Nemotron Terminal Corpus
+uv run python -m scripts.dataset_mixer datasets/ -o terminal.parquet --include Nemotron-Terminal-Corpus
+
+# Only Nemotron-SFT-Agentic-v2 (search + tool_calling)
+uv run python -m scripts.dataset_mixer datasets/ -o agentic.parquet --include Nemotron-SFT-Agentic-v2
+
+# Everything EXCEPT Nemotron
+uv run python -m scripts.dataset_mixer datasets/ -o non_nemotron.parquet --exclude Nemotron
+```
+
+#### Random Sampling
+
+```bash
+# Full Agentic v2 (no sampling)
+uv run python -m scripts.dataset_mixer datasets/ -o agentic_full.parquet \
+  --include Nemotron-SFT-Agentic-v2
+
+# 50% sample of Agentic v2 tool_calling (search always 100%)
+uv run python -m scripts.dataset_mixer datasets/ -o agentic_50.parquet \
+  --include Nemotron-SFT-Agentic-v2 \
+  --tooling-sample-rate 0.5
+
+# 40% sample of Agentic v2 tool_calling with seed
+uv run python -m scripts.dataset_mixer datasets/ -o agentic_40.parquet \
+  --include Nemotron-SFT-Agentic-v2 \
+  --tooling-sample-rate 0.40 \
+  --sample-seed 42
+
+# 20% sample of Agentic v2 tool_calling with seed
+uv run python -m scripts.dataset_mixer datasets/ -o agentic_20.parquet \
+  --include Nemotron-SFT-Agentic-v2 \
+  --tooling-sample-rate 0.2 \
+  --sample-seed 42
+```
+
+#### Full Nemotron Family Mix
+
+```bash
+# Full family (Terminal Corpus 100% + Agentic v2 100%)
+uv run python -m scripts.dataset_mixer datasets/ -o nemotron_full.parquet \
+  --include Nemotron
+
+# Full family with 40% sampling on tool_calling only (search stays 100%)
+uv run python -m scripts.dataset_mixer datasets/ -o nemotron_mixed.parquet \
+  --include Nemotron \
+  --tooling-sample-rate 0.40 \
+  --sample-seed 42
+```
+
+#### Memory Management
+
+```bash
+# Smaller batch size for large datasets
+uv run python -m scripts.dataset_mixer datasets/ -o output.parquet --batch-size 500
+```
+
+### Output Schema
+
+The mixer outputs Parquet with the following schema:
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `conversations` | list | Message history (role, content, etc.) |
+| `agent` | string | Agent type (nullable) |
+| `model` | string | Model name |
+| `model_provider` | string | Model provider |
+| `date` | string | Date (nullable) |
+| `task` | string | Task/category |
+| `episode` | int | Episode number (nullable) |
+| `run_id` | string | Unique run identifier |
+| `enable_thinking` | bool | Reasoning enabled |
+| `tools` | string | JSON tool definitions (nullable) |
+| `source_dataset` | string | Source dataset name |
+
+---
+
 ## Tips
 
 ### Large Datasets

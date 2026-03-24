@@ -184,15 +184,17 @@ An opinionated pipeline that combines specific HuggingFace datasets into a singl
 | Adapter | Dataset | Format | Transform |
 |---------|---------|--------|-----------|
 | `NemotronAdapter` | `nvidia/Nemotron-Terminal-Corpus` | Parquet | Drop `trial_name`/`source`, add `source_dataset` |
+| `NemotronAgenticV2Adapter` | `nvidia/Nemotron-SFT-Agentic-v2` | JSONL | Transform `messages` → `conversations` (handles search + tool_calling subsets) |
 | `MessagesJSONLAdapter` | `TeichAI/deepseek-v3.2-speciale-openr1-math-3k` | JSONL | Rename `messages` → `conversations`, fill metadata |
 | `PromptCompletionCSVAdapter` | `sequelbox/Raiden-Mini-DeepSeek-V3.2-Speciale` | CSV | Construct `conversations` from prompt/completion pairs |
 
 Key design decisions:
 - **Adapter auto-detection**: File format + column inspection determines adapter
-- **Streaming**: Processes records in batches (default 10K) to handle large files (162K+ rows)
+- **Streaming**: Processes records in batches (default 2K) to handle large files
 - **Schema enforcement**: Output uses an explicit `pa.schema()`, not inferred
 - **Provenance**: `source_dataset` column is derived from the HuggingFace directory name
-- **Source filtering**: `--include`/`--exclude` flags filter the file list by `source_dataset` before any data is read, enabling targeted mix outputs (e.g. Nemotron-only, non-Nemotron) from a single `datasets/` directory
+- **Source filtering**: `--include`/`--exclude` flags support **prefix matching** (e.g., `--include Nemotron` matches both `Nemotron-Terminal-Corpus` AND `Nemotron-SFT-Agentic-v2-*`)
+- **Random sampling**: `--tooling-sample-rate` applies random sampling only to `Nemotron-SFT-Agentic-v2-tool_calling` subset (search subset and other sources are unaffected)
 
 See the [Dataset Mixer section in README](../README.md#dataset-mixer) for usage.
 

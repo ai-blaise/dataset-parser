@@ -64,35 +64,87 @@ uv run python -m scripts.parser_finale dataset/train.jsonl -O parsed_datasets/
 
 ### Mix datasets into unified training data
 
+The dataset mixer combines multiple HuggingFace datasets into a single Parquet file with a unified schema.
+
+#### Basic Usage
+
 ```bash
-# Mix all datasets/ into a single Parquet file
+# Mix ALL datasets in datasets/ into a single Parquet file
 uv run python -m scripts.dataset_mixer datasets/ -o output-datasets/full_mix_all_sources.parquet
 
-# Nemotron Terminal Corpus only (adapters + synthetic tasks)
+# Dry-run: show record counts without writing output
+uv run python -m scripts.dataset_mixer datasets/ --dry-run
+```
+
+#### Source Filtering
+
+Filter which datasets to include or exclude using `--include` and `--exclude`. These flags support **prefix matching** (e.g., `--include Nemotron` matches both `Nemotron-Terminal-Corpus` and `Nemotron-SFT-Agentic-v2-*`):
+
+```bash
+# Only Nemotron family (Terminal Corpus + Agentic v2)
+uv run python -m scripts.dataset_mixer datasets/ -o output-datasets/nemotron_only.parquet \
+  --include Nemotron
+
+# Only Nemotron Terminal Corpus (adapters + synthetic tasks)
 uv run python -m scripts.dataset_mixer datasets/ -o output-datasets/nemotron_terminal_corpus_only.parquet \
   --include Nemotron-Terminal-Corpus
 
-# Everything except Nemotron (TeichAI + Raiden)
-uv run python -m scripts.dataset_mixer datasets/ -o output-datasets/teichai_raiden_no_nemotron.parquet \
-  --exclude Nemotron-Terminal-Corpus
-
-# Nemotron-SFT-Agentic-v2 only (search + tool_calling combined)
+# Only Nemotron-SFT-Agentic-v2 (search + tool_calling combined)
 uv run python -m scripts.dataset_mixer datasets/ -o output-datasets/nemotron_agentic_v2_combined.parquet \
   --include Nemotron-SFT-Agentic-v2
+```
 
-# Nemotron-SFT-Agentic-v2 with random sample (50%)
+#### Random Sampling
+
+Apply random sampling to **Nemotron-SFT-Agentic-v2** records only (does NOT affect other sources):
+
+```bash
+# Full Agentic v2 (no sampling)
+uv run python -m scripts.dataset_mixer datasets/ -o output-datasets/nemotron_agentic_v2_full.parquet \
+  --include Nemotron-SFT-Agentic-v2
+
+# 50% sample of Agentic v2 tool_calling (search stays 100%)
 uv run python -m scripts.dataset_mixer datasets/ -o output-datasets/nemotron_agentic_v2_sample_50.parquet \
   --include Nemotron-SFT-Agentic-v2 \
-  --sample-rate 0.5
+  --tooling-sample-rate 0.5
 
-# Nemotron-SFT-Agentic-v2 with random sample (20%) and seed for reproducibility
-uv run python -m scripts.dataset_mixer datasets/ -o output-datasets/nemotron_agentic_v2_sample_20.parquet \
+# 40% sample of Agentic v2 tool_calling with seed for reproducibility
+uv run python -m scripts.dataset_mixer datasets/ -o output-datasets/nemotron_agentic_v2_sample_40.parquet \
   --include Nemotron-SFT-Agentic-v2 \
-  --sample-rate 0.2 \
+  --tooling-sample-rate 0.40 \
   --sample-seed 42
 
-# Dry-run — show record counts per source, no output written
-uv run python -m scripts.dataset_mixer datasets/ --dry-run
+# 20% sample of Agentic v2 tool_calling with seed
+uv run python -m scripts.dataset_mixer datasets/ -o output-datasets/nemotron_agentic_v2_sample_20.parquet \
+  --include Nemotron-SFT-Agentic-v2 \
+  --tooling-sample-rate 0.2 \
+  --sample-seed 42
+```
+
+#### Full Nemotron Family Mix Examples
+
+```bash
+# FULL Nemotron family (Terminal Corpus + ALL Agentic v2) - NO sampling
+uv run python -m scripts.dataset_mixer datasets/ -o output-datasets/nemotron_full_family.parquet \
+  --include Nemotron
+
+# FULL Nemotron family + 40% sample of Agentic v2 tool_calling only
+# (Terminal Corpus = 100%, search = 100%, tool_calling = 40%)
+uv run python -m scripts.dataset_mixer datasets/ -o output-datasets/nemotron_mixed_sample.parquet \
+  --include Nemotron \
+  --tooling-sample-rate 0.40 \
+  --sample-seed 42
+```
+
+#### Advanced Options
+
+```bash
+# Custom batch size for memory control (default: 2000)
+uv run python -m scripts.dataset_mixer datasets/ -o output-datasets/custom.parquet \
+  --batch-size 500
+
+# Preview what will be included before running
+uv run python -m scripts.dataset_mixer datasets/ --dry-run --include Nemotron
 ```
 
 ### Split a dataset into parts
@@ -143,42 +195,48 @@ uv run python -m scripts.data_splitter dataset/conversations.jsonl -n 10 --dry-r
 
 ## Dataset Mixer
 
-The Dataset Mixer is an **opinionated pipeline** built specifically to combine these HuggingFace datasets into a single unified Parquet training file:
+The Dataset Mixer is an **opinionated pipeline** built specifically to combine Nemotron family HuggingFace datasets into a single unified Parquet training file:
 
 | Dataset | Format | Description |
 |---------|--------|-------------|
 | [nvidia/Nemotron-Terminal-Corpus](https://huggingface.co/datasets/nvidia/Nemotron-Terminal-Corpus) | Parquet | Multi-turn terminal conversations (code, math, SWE, synthetic tasks) |
-| [TeichAI/deepseek-v3.2-speciale-openr1-math-3k](https://huggingface.co/datasets/TeichAI/deepseek-v3.2-speciale-openr1-math-3k) | JSONL | Single-turn math reasoning with `<think>` chains |
-| [sequelbox/Raiden-Mini-DeepSeek-V3.2-Speciale](https://huggingface.co/datasets/sequelbox/Raiden-Mini-DeepSeek-V3.2-Speciale) | CSV | Creative/analytic reasoning prompt-completion pairs |
+| [nvidia/Nemotron-SFT-Agentic-v2](https://huggingface.co/datasets/nvidia/Nemotron-SFT-Agentic-v2) | JSONL | Agentic search + tool calling conversations |
 
-Each dataset has a dedicated adapter that handles its specific schema and normalizes records into a unified `conversations`-based output format with metadata columns. The `source_dataset` column tracks which HuggingFace dataset each record originated from (derived from the subdirectory name under `datasets/`).
+Each dataset has a dedicated adapter that handles its specific schema and normalizes records into a unified `conversations`-based output format with metadata columns. The `source_dataset` column tracks which HuggingFace dataset each record originated from.
 
 Place datasets in `datasets/` using their HuggingFace repository name as the directory:
 ```
 datasets/
 ├── Nemotron-Terminal-Corpus/
-├── deepseek-v3.2-speciale-openr1-math-3k/
-└── Raiden-Mini-DeepSeek-V3.2-Speciale/
+└── Nemotron-SFT-Agentic-v2/
 ```
 
 ### Source Filtering
 
-Use `--include` and `--exclude` to produce filtered mix outputs from a single `datasets/` directory. Filter values are subdirectory names (which become the `source_dataset` column in the output):
+Use `--include` and `--exclude` to produce filtered mix outputs from a single `datasets/` directory. Filter values support **prefix matching**:
 
 ```bash
-# All data combined (~379,771 records)
-uv run python -m scripts.dataset_mixer datasets/ -o output-datasets/full_mix_all_sources.parquet
+# Full Nemotron family (~380K records)
+# Combines Terminal Corpus (100%) + Agentic v2 (100%)
+uv run python -m scripts.dataset_mixer datasets/ -o output-datasets/nemotron_full_family.parquet \
+  --include Nemotron
 
-# Nemotron only — both dataset_adapters/ and synthetic_tasks/ (~368,413 records)
+# Nemotron Terminal Corpus only (~366K records)
 uv run python -m scripts.dataset_mixer datasets/ -o output-datasets/nemotron_terminal_corpus_only.parquet \
   --include Nemotron-Terminal-Corpus
 
-# Everything except Nemotron — TeichAI + Raiden (~11,358 records)
-uv run python -m scripts.dataset_mixer datasets/ -o output-datasets/teichai_raiden_no_nemotron.parquet \
-  --exclude Nemotron-Terminal-Corpus
+# Nemotron-SFT-Agentic-v2 only (~14K records)
+uv run python -m scripts.dataset_mixer datasets/ -o output-datasets/nemotron_agentic_v2_combined.parquet \
+  --include Nemotron-SFT-Agentic-v2
+
+# Full family with 40% sampling on tool_calling only (search stays 100%)
+uv run python -m scripts.dataset_mixer datasets/ -o output-datasets/nemotron_mixed_40.parquet \
+  --include Nemotron \
+  --tooling-sample-rate 0.40 \
+  --sample-seed 42
 ```
 
-Filtering operates on the **file list before any data is read** — excluded sources are never opened. Both flags accept multiple values and can be combined (`--include` narrows first, `--exclude` removes from the result).
+Filtering operates on the **file list before any data is read**. Both flags accept prefix matching (e.g., `--include Nemotron` matches both `Nemotron-Terminal-Corpus` and `Nemotron-SFT-Agentic-v2-*`).
 
 ## Future Plans
 
